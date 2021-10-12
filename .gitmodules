@@ -1,0 +1,9 @@
+[submodule "llvm_mode/Containers"]
+	path = llvm_mode/Containers
+	url = https://github.com/bkthomps/Containers
+[submodule "llvm_mode/tlsh"]
+	path = llvm_mode/tlsh
+	url = https://github.com/rnatella/tlsh/
+[submodule "llvm_mode/mvptree"]
+	path = llvm_mode/mvptree
+	url = https://github.com/michaelmior/mvptree/
