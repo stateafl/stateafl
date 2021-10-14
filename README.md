@@ -8,7 +8,7 @@ StateAFL automatically infers the current protocol state of the server. At compi
 ![StateAFL blocks](images/stateafl_blocks.png)
 
 
-More information about the internals of StateAFL are available in the following [research paper](https://arxiv.org/pdf/aaaa.aaaaa.pdf).
+More information about the internals of StateAFL are available in the following [research paper](https://arxiv.org/pdf/2110.06253.pdf).
 
 StateAFL has been implemented on top of the codebase of [AFL](http://lcamtuf.coredump.cx/afl/) and [AFLnet](https://github.com/aflnet/aflnet). To fuzz a server, it should be compiled using the `afl-clang-fast` tool in this project, to perform a compiler pass for instrumenting the target.
 
