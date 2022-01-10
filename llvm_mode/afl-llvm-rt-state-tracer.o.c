@@ -148,6 +148,16 @@ static map alloc_blacklist_map;
 #endif
 
 
+
+/* Do not initialize stack memory if ASAN is enabled.
+ * Enable "Stack Use After Return (UAR)" check to make ASAN initialize
+ * stack memory by poisoning, see https://clang.llvm.org/docs/AddressSanitizer.html
+ */
+static int asan_enabled = 0;
+
+
+
+
 void init_state_tracer();
 void end_state_tracer();
 
@@ -466,6 +476,14 @@ void init_state_tracer() {
     mvp_radius_default = atoi(mvp_str);
   }
 
+
+  if(getenv("AFL_USE_ASAN") || getenv("ASAN_OPTIONS")) {
+
+    LOG_DEBUG("ASAN DETECTED");
+
+    asan_enabled = 1;
+  }
+
 }
 
 
@@ -575,12 +593,6 @@ void new_alloc_record(void * addr, size_t size) {
   START_TIMING("alloc");
 
 
-  // Zero-byte initialization of the area
-  memset(addr, 0, size);
-
-
-  LOG_DEBUG("NEW ALLOC: %p, %lu\n", addr, size);
-
   if(curr_iter_no > 0)
     return;   /* Skip allocations after the first request/reply iteration */
 
@@ -655,9 +667,32 @@ void free_alloc_record(void * addr) {
 }
 
 
+void new_heap_alloc_record(void * addr, uint64_t size) {
+
+  LOG_DEBUG("NEW HEAP ALLOC: %p (%lu bytes)\n", addr, size);
+
+  // Zero-byte initialization of the area
+  memset(addr, 0, size);
+
+  new_alloc_record(addr, size);
+}
+
+void free_heap_alloc_record(void * addr, uint64_t size) {
+
+  LOG_DEBUG("FREE HEAP ALLOC: %p (%lu bytes)\n", addr, size);
+
+  free_alloc_record(addr);
+}
+
 void new_stack_alloc_record(void * addr, uint64_t size) {
 
   LOG_DEBUG("NEW STACK ALLOC: %p (%lu bytes)\n", addr, size);
+
+  if(!asan_enabled) {
+
+    // Zero-byte initialization of the area
+    memset(addr, 0, size);
+  }
 
   new_alloc_record(addr, size);
 }
@@ -671,7 +706,10 @@ void free_stack_alloc_record(void * addr, uint64_t size) {
 
 void trace_calloc(void * addr, int size, int nmemb) {
 
-  LOG_DEBUG("TRACE CALLOC\n");
+  LOG_DEBUG("NEW HEAP CALLOC: %p (%d elems, %lu bytes)\n", addr, nmemb, size*nmemb);
+
+  // Zero-byte initialization of the area
+  memset(addr, 0, size*nmemb);
 
   new_alloc_record(addr, size*nmemb);
 }

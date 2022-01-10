@@ -300,7 +300,7 @@ bool AFLCoverage::runOnModule(Module &M) {
           auto * int32Ty = Type::getInt32Ty(M.getContext());
 
           auto * helperTy = FunctionType::get(voidTy, int8PtrTy, int32Ty);
-          auto helper_malloc = M.getOrInsertFunction("new_alloc_record", helperTy);
+          auto helper_malloc = M.getOrInsertFunction("new_heap_alloc_record", helperTy);
 
           IRBuilder<> builder(call_instr);
           builder.SetInsertPoint(call_instr->getNextNode());
@@ -347,7 +347,7 @@ bool AFLCoverage::runOnModule(Module &M) {
           auto * int8PtrTy = Type::getInt8PtrTy(M.getContext());
 
           auto * helperTy = FunctionType::get(voidTy, int8PtrTy);
-          auto helper_free = M.getOrInsertFunction("free_alloc_record", helperTy);
+          auto helper_free = M.getOrInsertFunction("free_heap_alloc_record", helperTy);
 
           IRBuilder<> builder(call_instr);
           builder.CreateCall(helper_free, {call_instr->getOperand(0)});
