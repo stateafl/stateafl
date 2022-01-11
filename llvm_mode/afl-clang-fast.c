@@ -95,7 +95,7 @@ static void find_obj(u8* argv0) {
   }
 
   FATAL("Unable to find 'afl-llvm-rt.o' or 'afl-llvm-pass.so'. Please set AFL_PATH");
- 
+
 }
 
 
@@ -308,6 +308,18 @@ static void edit_params(u32 argc, char** argv) {
 
         break;
 
+    }
+
+    if (!strcmp(name, "afl-clang-fast++")) {
+
+      /* C++ version, with no LIBSTDCXX lib embedded, and no multiple definitions of "operator new"
+       * (prevents conflicts with ASAN)
+       */
+      cc_params[cc_par_cnt++] = alloc_printf("%s/afl-llvm-rt-state-tracer.o.cpp.o", obj_path);
+
+    } else {
+
+      cc_params[cc_par_cnt++] = alloc_printf("%s/afl-llvm-rt-state-tracer.o", obj_path);
     }
 
   }

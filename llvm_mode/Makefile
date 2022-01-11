@@ -56,9 +56,9 @@ ifeq "$(origin CC)" "default"
 endif
 
 ifndef AFL_TRACE_PC
-  PROGS      = ../afl-clang-fast ../afl-llvm-pass.so ../afl-llvm-rt.o ../afl-llvm-rt-32.o ../afl-llvm-rt-64.o ../afl-llvm-rt-state-tracer.o
+  PROGS      = ../afl-clang-fast ../afl-llvm-pass.so ../afl-llvm-rt.o ../afl-llvm-rt-32.o ../afl-llvm-rt-64.o ../afl-llvm-rt-state-tracer.o ../afl-llvm-rt-state-tracer.o.cpp.o
 else
-  PROGS      = ../afl-clang-fast ../afl-llvm-rt.o ../afl-llvm-rt-32.o ../afl-llvm-rt-64.o ../afl-llvm-rt-state-tracer.o
+  PROGS      = ../afl-clang-fast ../afl-llvm-rt.o ../afl-llvm-rt-32.o ../afl-llvm-rt-64.o ../afl-llvm-rt-state-tracer.o ../afl-llvm-rt-state-tracer.o.cpp.o
 endif
 
 CONTAINERS = ./containers.a
@@ -113,22 +113,22 @@ $(TLSH):
 	ld -r -o $@ $@.tmp.o $(TLSH)
 	mv $@ $@.tmp.o
 	ld -r -o $@ $@.tmp.o $(MVPTREE)
+	cp $@ $@.cpp.o
 	mv $@ $@.tmp.o
 	ld -r -o $@ $@.tmp.o $(STDCXX)
 	rm $@.tmp.o
 
-../afl-llvm-rt.o: afl-llvm-rt.o.c ../afl-llvm-rt-state-tracer.o | test_deps
-	$(CC) $(CFLAGS) -fPIC -c $< -o $@.tmp.o
-	ld -r -o $@ $@.tmp.o ../afl-llvm-rt-state-tracer.o
-	rm $@.tmp.o
+../afl-llvm-rt.o: afl-llvm-rt.o.c | test_deps
+	$(CC) $(CFLAGS) -fPIC -c $< -o $@
+
 
 ../afl-llvm-rt-32.o: afl-llvm-rt.o.c | test_deps
 	@printf "[*] Building 32-bit variant of the runtime (-m32)... "
-	@$(CC) $(CFLAGS) -m32 -fPIC -c $< -o $@.tmp.o 2>/dev/null; if [ "$$?" = "0" ]; then echo "success!"; ld -r -o $@ $@.tmp.o ../afl-llvm-rt-state-tracer.o; rm $@.tmp.o; else echo "failed (that's fine)"; fi
+	@$(CC) $(CFLAGS) -m32 -fPIC -c $< -o $@.tmp.o 2>/dev/null; if [ "$$?" = "0" ]; then echo "success!"; else echo "failed (that's fine)"; fi
 
 ../afl-llvm-rt-64.o: afl-llvm-rt.o.c | test_deps
 	@printf "[*] Building 64-bit variant of the runtime (-m64)... "
-	@$(CC) $(CFLAGS) -m64 -fPIC -c $< -o $@.tmp.o 2>/dev/null; if [ "$$?" = "0" ]; then echo "success!"; ld -r -o $@ $@.tmp.o ../afl-llvm-rt-state-tracer.o; rm $@.tmp.o; else echo "failed (that's fine)"; fi
+	@$(CC) $(CFLAGS) -m64 -fPIC -c $< -o $@.tmp.o 2>/dev/null; if [ "$$?" = "0" ]; then echo "success!"; else echo "failed (that's fine)"; fi
 
 test_build: $(PROGS)
 	@echo "[*] Testing the CC wrapper and instrumentation output..."
