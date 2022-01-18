@@ -765,8 +765,11 @@ void new_heap_alloc_record(void * addr, uint64_t size) {
 
   LOG_DEBUG("NEW HEAP ALLOC: %p (%lu bytes)\n", addr, size);
 
-  // Zero-byte initialization of the area
-  memset(addr, 0, size);
+  if(!asan_enabled) {
+
+    // Zero-byte initialization of the area
+    memset(addr, 0, size);
+  }
 
   new_alloc_record(addr, size);
 }
@@ -802,8 +805,11 @@ void trace_calloc(void * addr, int size, int nmemb) {
 
   LOG_DEBUG("NEW HEAP CALLOC: %p (%d elems, %lu bytes)\n", addr, nmemb, size*nmemb);
 
-  // Zero-byte initialization of the area
-  memset(addr, 0, size*nmemb);
+  if(!asan_enabled) {
+
+    // Zero-byte initialization of the area
+    memset(addr, 0, size*nmemb);
+  }
 
   new_alloc_record(addr, size*nmemb);
 }
