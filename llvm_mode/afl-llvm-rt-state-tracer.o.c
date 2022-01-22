@@ -87,7 +87,7 @@ static int __alloc_id = 0;
 static int curr_iter_no = 0;
 
 enum tracer_state { UNINITIALIZED, RECEIVING, SENDING };
-static enum tracer_state curr_tracer_state = RECEIVING;
+static enum tracer_state curr_tracer_state = UNINITIALIZED;
 
 struct alloc_record {
   int id;
