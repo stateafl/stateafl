@@ -192,6 +192,11 @@ struct calibration * calib_shm = NULL;
 int mvp_calibration_shm_id;
 
 
+static char** last_exec_argv;
+static u32 last_exec_timeout;
+
+
+
 static volatile u8 stop_soon,         /* Ctrl-C pressed?                  */
                    clear_screen = 1,  /* Window resized?                  */
                    child_timed_out;   /* Traced process timed out?        */
@@ -808,7 +813,78 @@ void update_state_aware_variables(struct queue_entry *q, u8 dry_run)
 
   q->unique_state_count = get_unique_state_count(state_sequence, state_count);
 
-  if (is_state_sequence_interesting(state_sequence, state_count)) {
+
+  int is_interesting = is_state_sequence_interesting(state_sequence, state_count);
+  int num_interesting = 0;
+  int repetitions = 3;
+
+  if(is_interesting && !dry_run) {
+
+    char *bak_response_buf = response_buf;
+    int bak_response_buf_size = response_buf_size;
+    u32 *bak_response_bytes = response_bytes;
+
+    response_buf = NULL;
+    response_buf_size = 0;
+    response_bytes = NULL;
+
+    for(int k=0; k<repetitions; k++) {
+
+      unsigned int repeated_state_count;
+      unsigned int *repeated_state_sequence;
+
+      run_target(last_exec_argv, last_exec_timeout);
+
+      if (!response_buf_size || !response_bytes) {
+        continue;
+      }
+
+      repeated_state_sequence = (*extract_response_codes)(response_buf, response_buf_size, &repeated_state_count);
+
+      int repetition_interesting = 0;
+
+      if( state_count == repeated_state_count ) {
+
+        int diff = 0;
+
+        for(int ii=0; ii<state_count; ii++) {
+          if(state_sequence[ii] != repeated_state_sequence[ii]) {
+
+            diff = 1;
+            break;
+          }
+        }
+
+        if(diff == 0) {
+          repetition_interesting = 1;
+        }
+      }
+
+
+      if( repetition_interesting ) {
+
+        num_interesting++;
+      }
+    }
+
+
+    if (response_buf) {
+      ck_free(response_buf);
+    }
+
+    if (response_bytes) {
+      ck_free(response_bytes);
+      response_bytes = NULL;
+    }
+
+    response_buf = bak_response_buf;
+    response_buf_size = bak_response_buf_size;
+    response_bytes = bak_response_bytes;
+  }
+
+
+  if ((!dry_run && (num_interesting > 0)) || (dry_run && is_interesting)) {
+
     //Save the current kl_messages to a file which can be used to replay the newly discovered paths on the ipsm
     u8 *temp_str = state_sequence_to_string(state_sequence, state_count);
     u8 *fname = alloc_printf("%s/replayable-new-ipsm-paths/id:%s:%s", out_dir, temp_str, dry_run ? basename(q->fname) : "new");
@@ -2685,7 +2761,6 @@ void init_ipsm(char** argv) {
     write_to_testcase(use_mem, q->len);
     ck_free(use_mem);
 
-
     run_target(argv, exec_tmout);
 
     /* Update state-aware variables (e.g., state machine, regions and their annotations */
@@ -2807,10 +2882,7 @@ unsigned int* extract_response_state_tracer(unsigned char* buf, unsigned int buf
 
   unsigned int state_tracer_count_all = state_shared_ptr->seq_len;
 
-  // AFLnet annotates partial sessions with partial state sequences.
-  // Accordingly, we only return a subset of the state sequence from the state tracer.
-
-  *state_count_ref = (orig_state_count < state_tracer_count_all ? orig_state_count : state_tracer_count_all);
+  *state_count_ref = state_tracer_count_all;
 
   unsigned int * state_sequence = ck_alloc( (*state_count_ref)*sizeof(int) );
   memcpy(state_sequence, state_shared_ptr->seq, *state_count_ref * sizeof(unsigned int));
@@ -3753,6 +3825,9 @@ static u8 run_target(char** argv, u32 timeout) {
   u32 tb4;
 
   child_timed_out = 0;
+
+  last_exec_argv = argv;
+  last_exec_timeout = timeout;
 
   /* After this memset, trace_bits[] are effectively volatile, so we
      must prevent any earlier operations from venturing into that
