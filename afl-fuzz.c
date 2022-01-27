@@ -873,6 +873,7 @@ void update_state_aware_variables(struct queue_entry *q, u8 dry_run, char** argv
 
     if (response_buf) {
       ck_free(response_buf);
+      response_buf = NULL;
     }
 
     if (response_bytes) {
