@@ -4069,7 +4069,7 @@ static void show_stats(void);
    to warn about flaky or otherwise problematic test cases early on; and when
    new paths are discovered to detect variable behavior and so on. */
 
-static u8 calibrate_case(char** argv, struct queue_entry* q, u8* use_mem,
+static u8 calibrate_case(char** argv, struct queue_entry* q, u8* use_mem, u32 len,
                          u32 handicap, u8 from_queue) {
 
   static u8 first_trace[MAP_SIZE];
@@ -4112,7 +4112,7 @@ static u8 calibrate_case(char** argv, struct queue_entry* q, u8* use_mem,
 
     if (!first_run && !(stage_cur % stats_update_freq)) show_stats();
 
-    write_to_testcase(use_mem, q->len);
+    write_to_testcase(use_mem, len);
 
     fault = run_target(argv, use_tmout);
 
@@ -4272,7 +4272,7 @@ static void perform_dry_run(char** argv) {
     /* AFLNet construct the kl_messages linked list for this queue entry*/
     kl_messages = construct_kl_messages(q->fname, q->regions, q->region_count);
 
-    res = calibrate_case(argv, q, use_mem, 0, 1);
+    res = calibrate_case(argv, q, use_mem, q->len, 0, 1);
     ck_free(use_mem);
 
 #ifndef DISABLE_TLSH_CALIBRATION
@@ -4764,7 +4764,7 @@ static u8 save_if_interesting(char** argv, void* mem, u32 len, u8 fault) {
     /* Try to calibrate inline; this also calls update_bitmap_score() when
        successful. */
 
-    res = calibrate_case(argv, queue_top, mem, queue_cycle - 1, 0);
+    res = calibrate_case(argv, queue_top, mem, len, queue_cycle - 1, 0);
 
     if (res == FAULT_ERROR)
       FATAL("Unable to execute target application");
