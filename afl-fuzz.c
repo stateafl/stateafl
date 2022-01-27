@@ -104,6 +104,8 @@ EXP_ST u8 *in_dir,                    /* Input directory with test cases  */
           *in_bitmap,                 /* Input bitmap                     */
           *doc_path,                  /* Path to documentation dir        */
           *target_path,               /* Path to target binary            */
+          *target_path_afl,           /* Path to "vanilla" version of
+                                         binary (without StateAFL probes) */
           *orig_cmdline;              /* Original command line            */
 
 EXP_ST u32 exec_tmout = EXEC_TIMEOUT; /* Configurable exec timeout (ms)   */
@@ -142,12 +144,19 @@ EXP_ST u8  skip_deterministic,        /* Skip deterministic stages?       */
 static s32 out_fd,                    /* Persistent fd for out_file       */
            dev_urandom_fd = -1,       /* Persistent fd for /dev/urandom   */
            dev_null_fd = -1,          /* Persistent fd for /dev/null      */
-           fsrv_ctl_fd,               /* Fork server control pipe (write) */
-           fsrv_st_fd;                /* Fork server status pipe (read)   */
+           out_dir_fd = -1,           /* FD of the lock file              */
+           child_pid = -1;            /* PID of the fuzzed program        */
 
-static s32 forksrv_pid,               /* PID of the fork server           */
-           child_pid = -1,            /* PID of the fuzzed program        */
-           out_dir_fd = -1;           /* FD of the lock file              */
+struct forkserver {
+  s32 forksrv_pid,               /* PID of the fork server           */
+      fsrv_ctl_fd,               /* Fork server control pipe (write) */
+      fsrv_st_fd;                /* Fork server status pipe (read)   */
+  u8* target_path;               /* Path of the target executable    */
+};
+
+struct forkserver *afl_fsrv = NULL,
+                  *stateafl_fsrv = NULL,
+                  *current_fsrv = NULL;
 
 EXP_ST u8* trace_bits;                /* SHM with instrumentation bitmap  */
 
@@ -191,9 +200,6 @@ FILE * log_state_tracer;
 struct calibration * calib_shm = NULL;
 int mvp_calibration_shm_id;
 
-
-static char** last_exec_argv;
-static u32 last_exec_timeout;
 
 
 
@@ -384,7 +390,7 @@ enum {
 
 char** use_argv;  /* argument to run the target program. In vanilla AFL, this is a local variable in main. */
 /* add these declarations here so we can call these functions earlier */
-static u8 run_target(char** argv, u32 timeout);
+static u8 run_target(char** argv, u32 timeout, struct forkserver *fsrv);
 static inline u32 UR(u32 limit);
 static inline u8 has_new_bits(u8* virgin_map);
 
@@ -800,7 +806,7 @@ struct queue_entry *choose_seed(u32 target_state_id, u8 mode)
 }
 
 /* Update state-aware variables */
-void update_state_aware_variables(struct queue_entry *q, u8 dry_run)
+void update_state_aware_variables(struct queue_entry *q, u8 dry_run, char** argv)
 {
   khint_t k;
   int discard, i;
@@ -815,7 +821,7 @@ void update_state_aware_variables(struct queue_entry *q, u8 dry_run)
 
 
   int is_interesting = is_state_sequence_interesting(state_sequence, state_count);
-  int num_interesting = 0;
+  int is_repeatable = 0;
   int repetitions = 3;
 
   if(is_interesting && !dry_run) {
@@ -833,7 +839,7 @@ void update_state_aware_variables(struct queue_entry *q, u8 dry_run)
       unsigned int repeated_state_count;
       unsigned int *repeated_state_sequence;
 
-      run_target(last_exec_argv, last_exec_timeout);
+      run_target(argv, exec_tmout * 2, stateafl_fsrv);
 
       if (!response_buf_size || !response_bytes) {
         continue;
@@ -841,7 +847,6 @@ void update_state_aware_variables(struct queue_entry *q, u8 dry_run)
 
       repeated_state_sequence = (*extract_response_codes)(response_buf, response_buf_size, &repeated_state_count);
 
-      int repetition_interesting = 0;
 
       if( state_count == repeated_state_count ) {
 
@@ -856,14 +861,9 @@ void update_state_aware_variables(struct queue_entry *q, u8 dry_run)
         }
 
         if(diff == 0) {
-          repetition_interesting = 1;
+          is_repeatable = 1;
+          break;
         }
-      }
-
-
-      if( repetition_interesting ) {
-
-        num_interesting++;
       }
 
 
@@ -886,7 +886,7 @@ void update_state_aware_variables(struct queue_entry *q, u8 dry_run)
   }
 
 
-  if ((!dry_run && (num_interesting > 0)) || (dry_run && is_interesting)) {
+  if ((!dry_run && is_repeatable) || (dry_run && is_interesting)) {
 
     //Save the current kl_messages to a file which can be used to replay the newly discovered paths on the ipsm
     u8 *temp_str = state_sequence_to_string(state_sequence, state_count);
@@ -1532,17 +1532,33 @@ HANDLE_RESPONSES:
   }
 
   //wait a bit letting the server to complete its remaining task(s)
-  memset(session_virgin_bits, 255, MAP_SIZE);
-  while(1) {
-    if (has_new_bits(session_virgin_bits) != 2) break;
+
+  if(current_fsrv == afl_fsrv) {
+
+    /* Only analyzes coverage bitmaps for executions not probed by StateAFL */
+
+    memset(session_virgin_bits, 255, MAP_SIZE);
+    while(1) {
+      if (has_new_bits(session_virgin_bits) != 2) break;
+    }
+
+  }
+  else {
+
+    /* The server will save the state sequence when exit()ing,
+       AFTER a response message is sent. We wait for a few additional ms,
+       to let the process terminate and save the state sequence. */
+    usleep(server_wait_usecs);
+
+    // waiting for state tracer done
+    if(state_shared_ptr->iterations > 0) {
+      int trials = 1000;
+      while(state_shared_ptr->seq_len < state_shared_ptr->iterations && --trials > 0) { usleep(1000); }
+    }
   }
 
-  close(sockfd);
 
-  /* The server will save the state sequence when exit()ing,
-     AFTER a response message is sent. We wait for a few ms,
-     to let the process terminate and save the state sequence. */
-  usleep(server_wait_usecs);
+  close(sockfd);
 
   if (likely_buggy && false_negative_reduction) return 0;
 
@@ -1552,12 +1568,6 @@ HANDLE_RESPONSES:
   while(1) {
     int status = kill(child_pid, 0);
     if ((status != 0) && (errno == ESRCH)) break;
-  }
-
-  // waiting for state tracer done
-  if(state_shared_ptr->iterations > 0) {
-    int trials = 1000;
-    while(state_shared_ptr->seq_len < state_shared_ptr->iterations && --trials > 0) { usleep(1000); }
   }
 
   return 0;
@@ -2764,10 +2774,10 @@ void init_ipsm(char** argv) {
     write_to_testcase(use_mem, q->len);
     ck_free(use_mem);
 
-    run_target(argv, exec_tmout);
+    run_target(argv, exec_tmout * 2, stateafl_fsrv);
 
     /* Update state-aware variables (e.g., state machine, regions and their annotations */
-    if (state_aware_mode) update_state_aware_variables(q, 1);
+    if (state_aware_mode) update_state_aware_variables(q, 1, argv);
 
     /* AFLNet delete the kl_messages */
     delete_kl_messages(kl_messages);
@@ -3533,7 +3543,7 @@ static void destroy_extras(void) {
    cloning a stopped child. So, we just execute once, and then send commands
    through a pipe. The other part of this logic is in afl-as.h. */
 
-EXP_ST void init_forkserver(char** argv) {
+EXP_ST void init_forkserver(char** argv, struct forkserver *fsrv, u8* exe_path, u8 disable_tracing) {
 
   static struct itimerval it;
   int st_pipe[2], ctl_pipe[2];
@@ -3542,13 +3552,15 @@ EXP_ST void init_forkserver(char** argv) {
 
   ACTF("Spinning up the fork server...");
 
+  fsrv->target_path = exe_path;
+
   if (pipe(st_pipe) || pipe(ctl_pipe)) PFATAL("pipe() failed");
 
-  forksrv_pid = fork();
+  fsrv->forksrv_pid = fork();
 
-  if (forksrv_pid < 0) PFATAL("fork() failed");
+  if (fsrv->forksrv_pid < 0) PFATAL("fork() failed");
 
-  if (!forksrv_pid) {
+  if (!fsrv->forksrv_pid) {
 
     struct rlimit r;
 
@@ -3645,7 +3657,10 @@ EXP_ST void init_forkserver(char** argv) {
                            "allocator_may_return_null=1:"
                            "msan_track_origins=0", 0);
 
-    execv(target_path, argv);
+    if(disable_tracing)
+      unsetenv(SHM_ENV_VAR);
+
+    execv(fsrv->target_path, argv);
 
     /* Use a distinctive bitmap signature to tell the parent about execv()
        falling through. */
@@ -3660,8 +3675,8 @@ EXP_ST void init_forkserver(char** argv) {
   close(ctl_pipe[0]);
   close(st_pipe[1]);
 
-  fsrv_ctl_fd = ctl_pipe[1];
-  fsrv_st_fd  = st_pipe[0];
+  fsrv->fsrv_ctl_fd = ctl_pipe[1];
+  fsrv->fsrv_st_fd  = st_pipe[0];
 
   /* Wait for the fork server to come up, but don't wait too long. */
 
@@ -3670,7 +3685,7 @@ EXP_ST void init_forkserver(char** argv) {
 
   setitimer(ITIMER_REAL, &it, NULL);
 
-  rlen = read(fsrv_st_fd, &status, 4);
+  rlen = read(fsrv->fsrv_st_fd, &status, 4);
 
   it.it_value.tv_sec = 0;
   it.it_value.tv_usec = 0;
@@ -3688,7 +3703,7 @@ EXP_ST void init_forkserver(char** argv) {
   if (child_timed_out)
     FATAL("Timeout while initializing fork server (adjusting -t may help)");
 
-  if (waitpid(forksrv_pid, &status, 0) <= 0)
+  if (waitpid(fsrv->forksrv_pid, &status, 0) <= 0)
     PFATAL("waitpid() failed");
 
   if (WIFSIGNALED(status)) {
@@ -3818,26 +3833,27 @@ EXP_ST void init_forkserver(char** argv) {
 /* Execute target application, monitoring for timeouts. Return status
    information. The called program will update trace_bits[]. */
 
-static u8 run_target(char** argv, u32 timeout) {
+static u8 run_target(char** argv, u32 timeout, struct forkserver *fsrv) {
 
   static struct itimerval it;
   static u32 prev_timed_out = 0;
   static u64 exec_ms = 0;
 
   int status = 0;
-  u32 tb4;
+  u32 tb4 = 0;
 
   child_timed_out = 0;
 
-  last_exec_argv = argv;
-  last_exec_timeout = timeout;
+  current_fsrv = fsrv;  /* for handling signals and timeouts */
 
   /* After this memset, trace_bits[] are effectively volatile, so we
      must prevent any earlier operations from venturing into that
      territory. */
 
-  memset(trace_bits, 0, MAP_SIZE);
-  MEM_BARRIER();
+  if(current_fsrv == afl_fsrv) {
+    memset(trace_bits, 0, MAP_SIZE);
+    MEM_BARRIER();
+  }
 
   /* If we're running in "dumb" mode, we can't rely on the fork server
      logic compiled into the target program, so we will just keep calling
@@ -3928,14 +3944,14 @@ static u8 run_target(char** argv, u32 timeout) {
     /* In non-dumb mode, we have the fork server up and running, so simply
        tell it to have at it, and then read back PID. */
 
-    if ((res = write(fsrv_ctl_fd, &prev_timed_out, 4)) != 4) {
+    if ((res = write(fsrv->fsrv_ctl_fd, &prev_timed_out, 4)) != 4) {
 
       if (stop_soon) return 0;
       RPFATAL(res, "Unable to request new process from fork server (OOM?)");
 
     }
 
-    if ((res = read(fsrv_st_fd, &child_pid, 4)) != 4) {
+    if ((res = read(fsrv->fsrv_st_fd, &child_pid, 4)) != 4) {
 
       if (stop_soon) return 0;
       RPFATAL(res, "Unable to request new process from fork server (OOM?)");
@@ -3963,13 +3979,12 @@ static u8 run_target(char** argv, u32 timeout) {
     if (use_net) send_over_network();
     s32 res;
 
-    if ((res = read(fsrv_st_fd, &status, 4)) != 4) {
+    if ((res = read(fsrv->fsrv_st_fd, &status, 4)) != 4) {
 
       if (stop_soon) return 0;
       RPFATAL(res, "Unable to communicate with fork server (OOM?)");
 
     }
-
   }
 
   if (!WIFSTOPPED(status)) child_pid = 0;
@@ -3989,15 +4004,19 @@ static u8 run_target(char** argv, u32 timeout) {
      compiler below this point. Past this location, trace_bits[] behave
      very normally and do not have to be treated as volatile. */
 
-  MEM_BARRIER();
+  if(current_fsrv == afl_fsrv) {
 
-  tb4 = *(u32*)trace_bits;
+    MEM_BARRIER();
+
+    tb4 = *(u32*)trace_bits;
 
 #ifdef WORD_SIZE_64
-  classify_counts((u64*)trace_bits);
+    classify_counts((u64*)trace_bits);
 #else
-  classify_counts((u32*)trace_bits);
+    classify_counts((u32*)trace_bits);
 #endif /* ^WORD_SIZE_64 */
+
+  }
 
   prev_timed_out = child_timed_out;
 
@@ -4099,11 +4118,7 @@ static u8 calibrate_case(char** argv, struct queue_entry* q, u8* use_mem, u32 le
   stage_name = "calibration";
   stage_max  = fast_cal ? fast_cal : CAL_CYCLES;
 
-  /* Make sure the forkserver is up before we do anything, and let's not
-     count its spin-up time toward binary calibration. */
 
-  if (dumb_mode != 1 && !no_forkserver && !forksrv_pid)
-    init_forkserver(argv);
 
   if (q->exec_cksum) memcpy(first_trace, trace_bits, MAP_SIZE);
 
@@ -4117,7 +4132,7 @@ static u8 calibrate_case(char** argv, struct queue_entry* q, u8* use_mem, u32 le
 
     write_to_testcase(use_mem, len);
 
-    fault = run_target(argv, use_tmout);
+    fault = run_target(argv, use_tmout, afl_fsrv);
 
     /* stop_soon is set by the handler for Ctrl+C. When it's pressed,
        we want to bail out quickly. */
@@ -4276,37 +4291,11 @@ static void perform_dry_run(char** argv) {
     kl_messages = construct_kl_messages(q->fname, q->regions, q->region_count);
 
     res = calibrate_case(argv, q, use_mem, q->len, 0, 1);
+
     ck_free(use_mem);
 
-#ifndef DISABLE_TLSH_CALIBRATION
-#ifdef LOG_STATE_TRACER
-  fprintf(log_state_tracer, "\nREFERENCE LENGTH: %d\n", calib_shm->ref_len);
-
-  for(int i=0; i < calib_shm->ref_len; i++) {
-
-	  fprintf(log_state_tracer, "[%d] %s\n", i, calib_shm->ref_state_seq[i]);
-  }
-
-  fprintf(log_state_tracer, "\nDISTANCE LENGTH: %d\n", calib_shm->dist_len);
-
-  for(int i=0; i < calib_shm->dist_len; i++) {
-
-	  fprintf(log_state_tracer, "%d ", calib_shm->dist[i]);
-
-	  if( ((i+1) % calib_shm->ref_len) == 0 ) {
-		  fprintf(log_state_tracer, "\n");
-	  }
-  }
-
-  fprintf(log_state_tracer, "\n");
-#endif
-#endif
-
-
-#ifdef DISABLE_TLSH_CALIBRATION
     /* Update state-aware variables (e.g., state machine, regions and their annotations */
-    if (state_aware_mode) update_state_aware_variables(q, 1);
-#endif
+    ///if (state_aware_mode) update_state_aware_variables(q, 1, argv);
 
 
     /* save the seed to file for replaying */
@@ -4489,6 +4478,32 @@ static void perform_dry_run(char** argv) {
   tlsh_set_distance();
   init_ipsm(argv);
 #endif
+
+#ifndef DISABLE_TLSH_CALIBRATION
+#ifdef LOG_STATE_TRACER
+  fprintf(log_state_tracer, "\nREFERENCE LENGTH: %d\n", calib_shm->ref_len);
+
+  for(int i=0; i < calib_shm->ref_len; i++) {
+
+	  fprintf(log_state_tracer, "[%d] %s\n", i, calib_shm->ref_state_seq[i]);
+  }
+
+  fprintf(log_state_tracer, "\nDISTANCE LENGTH: %d\n", calib_shm->dist_len);
+
+  for(int i=0; i < calib_shm->dist_len; i++) {
+
+	  fprintf(log_state_tracer, "%d ", calib_shm->dist[i]);
+
+	  if( ((i+1) % calib_shm->ref_len) == 0 ) {
+		  fprintf(log_state_tracer, "\n");
+	  }
+  }
+
+  fprintf(log_state_tracer, "\n");
+#endif
+#endif
+
+
 
 #ifdef EXIT_AFTER_CALIBRATION
   OKF("Done with calibration, exiting...");
@@ -4750,7 +4765,11 @@ static u8 save_if_interesting(char** argv, void* mem, u32 len, u8 fault) {
     /* We use the actual length of all messages (full_len), not the len of the mutated message subsequence (len)*/
     add_to_queue(fn, full_len, 0);
 
-    if (state_aware_mode) update_state_aware_variables(queue_top, 0);
+    /* Re-run with state analyzer to update state machine */
+    if (state_aware_mode) {
+      run_target(argv, exec_tmout * 2, stateafl_fsrv);
+      update_state_aware_variables(queue_top, 0, argv);
+    }
 
     /* save the seed to file for replaying */
     u8 *fn_replay = alloc_printf("%s/replayable-queue/%s", out_dir, basename(queue_top->fname));
@@ -4816,7 +4835,7 @@ static u8 save_if_interesting(char** argv, void* mem, u32 len, u8 fault) {
 
         u8 new_fault;
         write_to_testcase(mem, len);
-        new_fault = run_target(argv, hang_tmout);
+        new_fault = run_target(argv, hang_tmout, afl_fsrv);
 
         /* A corner case that one user reported bumping into: increasing the
            timeout actually uncovers a crash. Make sure we don't discard it if
@@ -6212,7 +6231,7 @@ EXP_ST u8 common_fuzz_stuff(char** argv, u8* out_buf, u32 len) {
 
   /* End of AFLNet code */
 
-  fault = run_target(argv, exec_tmout);
+  fault = run_target(argv, exec_tmout, afl_fsrv);
 
   //Update fuzz count, no matter whether the generated test is interesting or not
   if (state_aware_mode) update_fuzzs();
@@ -8472,7 +8491,7 @@ static void sync_fuzzers(char** argv) {
 
         write_to_testcase(mem, st.st_size);
 
-        fault = run_target(argv, exec_tmout);
+        fault = run_target(argv, exec_tmout, afl_fsrv);
 
         if (stop_soon) return;
 
@@ -8518,7 +8537,8 @@ static void handle_stop_sig(int sig) {
   stop_soon = 1;
 
   if (child_pid > 0) kill(child_pid, SIGKILL);
-  if (forksrv_pid > 0) kill(forksrv_pid, SIGKILL);
+  if (afl_fsrv && afl_fsrv->forksrv_pid > 0) kill(afl_fsrv->forksrv_pid, SIGKILL);
+  if (stateafl_fsrv && stateafl_fsrv->forksrv_pid > 0) kill(stateafl_fsrv->forksrv_pid, SIGKILL);
 
 }
 
@@ -8540,10 +8560,10 @@ static void handle_timeout(int sig) {
     child_timed_out = 1;
     kill(child_pid, SIGKILL);
 
-  } else if (child_pid == -1 && forksrv_pid > 0) {
+  } else if (child_pid == -1 && current_fsrv && current_fsrv->forksrv_pid > 0) {
 
     child_timed_out = 1;
-    kill(forksrv_pid, SIGKILL);
+    kill(current_fsrv->forksrv_pid, SIGKILL);
 
   }
 
@@ -9544,7 +9564,7 @@ int main(int argc, char** argv) {
   gettimeofday(&tv, &tz);
   srandom(tv.tv_sec ^ tv.tv_usec ^ getpid());
 
-  while ((opt = getopt(argc, argv, "+i:o:f:m:t:T:dnCB:S:M:x:QN:D:W:w:e:P:KEq:s:RFc:l:")) > 0)
+  while ((opt = getopt(argc, argv, "+i:o:f:m:t:T:dnCB:S:M:x:QN:D:W:w:e:P:KEq:s:RFc:l:u:")) > 0)
 
     switch (opt) {
 
@@ -9834,8 +9854,19 @@ int main(int argc, char** argv) {
 
         if (local_port) FATAL("Multiple -l options not supported");
         local_port = atoi(optarg);
-	      if (local_port < 1024 || local_port > 65535) FATAL("Invalid source port number");
+        if (local_port < 1024 || local_port > 65535) FATAL("Invalid source port number");
         break;
+
+      case 'u': { /* "vanilla" executable (without StateAFL probes) */
+
+          if (target_path_afl) FATAL("Multiple -u options not supported");
+
+          check_binary(optarg);
+          target_path_afl = target_path;
+
+          break;
+
+      }
 
       default:
 
@@ -9931,6 +9962,24 @@ int main(int argc, char** argv) {
     use_argv = get_qemu_argv(argv[0], argv + optind, argc - optind);
   else
     use_argv = argv + optind;
+
+  /* Make sure the forkserver is up before we do anything, and let's not
+     count its spin-up time toward binary calibration. */
+
+  if (dumb_mode != 1 && !no_forkserver && current_fsrv == NULL) {
+
+    afl_fsrv = ck_alloc(sizeof(struct forkserver));
+
+    if(target_path_afl)
+      init_forkserver(use_argv, afl_fsrv, target_path_afl, 0);
+    else
+      init_forkserver(use_argv, afl_fsrv, target_path, 0);
+
+    stateafl_fsrv = ck_alloc(sizeof(struct forkserver));
+    init_forkserver(use_argv, stateafl_fsrv, target_path, 1);
+
+    current_fsrv = afl_fsrv;
+  }
 
   perform_dry_run(use_argv);
 
@@ -10080,10 +10129,15 @@ int main(int argc, char** argv) {
      If we stopped manually, this is done by the signal handler. */
   if (stop_soon == 2) {
       if (child_pid > 0) kill(child_pid, SIGKILL);
-      if (forksrv_pid > 0) kill(forksrv_pid, SIGKILL);
+      if (afl_fsrv && afl_fsrv->forksrv_pid > 0) kill(afl_fsrv->forksrv_pid, SIGKILL);
+      if (stateafl_fsrv && stateafl_fsrv->forksrv_pid > 0) kill(stateafl_fsrv->forksrv_pid, SIGKILL);
   }
+
   /* Now that we've killed the forkserver, we wait for it to be able to get rusage stats. */
-  if (waitpid(forksrv_pid, NULL, 0) <= 0) {
+  if (afl_fsrv && waitpid(afl_fsrv->forksrv_pid, NULL, 0) <= 0) {
+    WARNF("error waitpid\n");
+  }
+  if (stateafl_fsrv && waitpid(stateafl_fsrv->forksrv_pid, NULL, 0) <= 0) {
     WARNF("error waitpid\n");
   }
 
@@ -10110,7 +10164,11 @@ stop_fuzzing:
   destroy_queue();
   destroy_extras();
   ck_free(target_path);
+  ck_free(target_path_afl);
   ck_free(sync_id);
+
+  ck_free(afl_fsrv);
+  ck_free(stateafl_fsrv);
 
   destroy_ipsm();
 
