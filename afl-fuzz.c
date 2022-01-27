@@ -865,6 +865,9 @@ void update_state_aware_variables(struct queue_entry *q, u8 dry_run)
 
         num_interesting++;
       }
+
+
+      ck_free(repeated_state_sequence);
     }
 
 
