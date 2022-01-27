@@ -2892,8 +2892,8 @@ unsigned int* extract_response_state_tracer(unsigned char* buf, unsigned int buf
   aflnet_state_count = orig_state_count;
 
   if(aflnet_state_sequence) ck_free(aflnet_state_sequence);
-  aflnet_state_sequence = ck_alloc( (*state_count_ref)*sizeof(int) );
-  memcpy(aflnet_state_sequence, orig_state_sequence, (*state_count_ref)*sizeof(int) );
+  aflnet_state_sequence = ck_alloc( aflnet_state_count*sizeof(int) );
+  memcpy(aflnet_state_sequence, orig_state_sequence, aflnet_state_count*sizeof(int) );
 #endif
 
 #ifdef LOG_STATE_TRACER
