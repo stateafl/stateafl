@@ -4312,7 +4312,7 @@ static void perform_dry_run(char** argv) {
     /* Perform additional runs to get data for TLSH calibration */
     if (state_aware_mode) {
 
-      for(int ii=0; ii<(fast_cal ? fast_cal : CAL_CYCLES); ii++) {
+      for(int ii=0; ii<3; ii++) {
 
         run_target(argv, exec_tmout * 2, stateafl_fsrv);
       }
