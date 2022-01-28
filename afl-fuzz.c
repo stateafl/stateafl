@@ -570,7 +570,7 @@ void update_region_annotations(struct queue_entry* q)
   u32 i = 0;
 
   for (i = 0; i < q->region_count; i++) {
-    if ((response_bytes[i] == 0) || ( i > 0 && (response_bytes[i] - response_bytes[i - 1] == 0))) {
+    if ((response_bytes[i] == 0) || ( i > 0 && (response_bytes[i] - response_bytes[i - 1] == 0)) || i >= messages_sent) {
       q->regions[i].state_sequence = NULL;
       q->regions[i].state_count = 0;
     } else {
@@ -833,7 +833,7 @@ void update_state_aware_variables(struct queue_entry *q, u8 dry_run, char** argv
   int is_repeatable = 0;
   int repetitions = 3;
 
-  if(is_interesting && !dry_run) {
+  if(is_interesting) {
 
     char *bak_response_buf = response_buf;
     int bak_response_buf_size = response_buf_size;
