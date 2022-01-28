@@ -569,14 +569,23 @@ void update_region_annotations(struct queue_entry* q)
 {
   u32 i = 0;
 
-  for (i = 0; i < messages_sent; i++) {
+  for (i = 0; i < q->region_count; i++) {
     if ((response_bytes[i] == 0) || ( i > 0 && (response_bytes[i] - response_bytes[i - 1] == 0))) {
       q->regions[i].state_sequence = NULL;
       q->regions[i].state_count = 0;
     } else {
       unsigned int state_count;
-      q->regions[i].state_sequence = (*extract_response_codes)(response_buf, response_bytes[i], &state_count);
-      q->regions[i].state_count = (i < state_count ? i : state_count);
+      unsigned int *state_sequence = (*extract_response_codes)(response_buf, response_bytes[i], &state_count);
+
+      if(i <= state_count) {
+        q->regions[i].state_sequence = state_sequence;
+        q->regions[i].state_count = i;
+      } else {
+        ck_free(state_sequence);
+        q->regions[i].state_sequence = NULL;
+        q->regions[i].state_count = 0;
+      }
+
     }
   }
 }
