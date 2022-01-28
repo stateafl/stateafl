@@ -576,7 +576,7 @@ void update_region_annotations(struct queue_entry* q)
     } else {
       unsigned int state_count;
       q->regions[i].state_sequence = (*extract_response_codes)(response_buf, response_bytes[i], &state_count);
-      q->regions[i].state_count = state_count;
+      q->regions[i].state_count = (i < state_count ? i : state_count);
     }
   }
 }
@@ -874,6 +874,7 @@ void update_state_aware_variables(struct queue_entry *q, u8 dry_run, char** argv
     if (response_buf) {
       ck_free(response_buf);
       response_buf = NULL;
+      response_buf_size = 0;
     }
 
     if (response_bytes) {
@@ -4295,8 +4296,15 @@ static void perform_dry_run(char** argv) {
 
     ck_free(use_mem);
 
-    /* Update state-aware variables (e.g., state machine, regions and their annotations */
-    ///if (state_aware_mode) update_state_aware_variables(q, 1, argv);
+    /* Perform additional runs to get data for TLSH calibration */
+    if (state_aware_mode) {
+
+      for(int ii=0; ii<(fast_cal ? fast_cal : CAL_CYCLES); ii++) {
+
+        run_target(argv, exec_tmout * 2, stateafl_fsrv);
+      }
+
+    }
 
 
     /* save the seed to file for replaying */
