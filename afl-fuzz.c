@@ -1559,11 +1559,15 @@ HANDLE_RESPONSES:
     /* The server will save the state sequence when exit()ing,
        AFTER a response message is sent. We wait for a few additional ms,
        to let the process terminate and save the state sequence. */
+
     usleep(server_wait_usecs);
+
+    int trials = 1000;
+    while(state_shared_ptr->iterations == 0 && --trials > 0) { usleep(5000); }
 
     // waiting for state tracer done
     if(state_shared_ptr->iterations > 0) {
-      int trials = 1000;
+      trials = 1000;
       while(state_shared_ptr->seq_len < state_shared_ptr->iterations && --trials > 0) { usleep(1000); }
     }
   }
