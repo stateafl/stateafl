@@ -66,7 +66,7 @@ TLSH = ./libtlsh.a
 MVPTREE = ./libmvptree.a
 STDCXX = $(shell find /usr/lib -name "libstdc++.a" | grep x86_64 | grep -v 32 | head -n 1)
 
-all: test_deps $(PROGS) test_build all_done
+all: test_deps $(PROGS) test_build all_done obj_section_rename
 
 test_deps:
 ifndef AFL_TRACE_PC
@@ -129,6 +129,12 @@ $(TLSH):
 ../afl-llvm-rt-64.o: afl-llvm-rt.o.c | test_deps
 	@printf "[*] Building 64-bit variant of the runtime (-m64)... "
 	@$(CC) $(CFLAGS) -m64 -fPIC -c $< -o $@ 2>/dev/null; if [ "$$?" = "0" ]; then echo "success!"; else echo "failed (that's fine)"; fi
+
+obj_section_rename:
+	for OBJ_FILE in ../afl-llvm-rt*.o ; do \
+		objcopy --rename-section .data=.tracer_data $${OBJ_FILE}; \
+		objcopy --rename-section .bss=.tracer_bss $${OBJ_FILE}; \
+	done
 
 test_build: $(PROGS)
 	@echo "[*] Testing the CC wrapper and instrumentation output..."

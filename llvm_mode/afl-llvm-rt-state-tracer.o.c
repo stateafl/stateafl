@@ -153,7 +153,7 @@ static map alloc_blacklist_map;
  * Enable "Stack Use After Return (UAR)" check to make ASAN initialize
  * stack memory by poisoning, see https://clang.llvm.org/docs/AddressSanitizer.html
  */
-static int asan_enabled = 0;
+static int addr_san_detected = 0;
 
 
 
@@ -245,16 +245,16 @@ void * internal_memcpy(void *dst0, const void *src0, size_t length)
 	char *dst = dst0;
 	const char *src = src0;
 	size_t t;
-	
+
 	if (length == 0 || dst == src)		/* nothing to do */
 		goto done;
-	
+
 	/*
 	 * Macros: loop-t-times; and loop-t-times, t>0
 	 */
 #define	TLOOP(s) if (t) TLOOP1(s)
 #define	TLOOP1(s) do { s; } while (--t)
-	
+
 	if ((unsigned long)dst < (unsigned long)src) {
 		/*
 		 * Copy forward.
@@ -575,7 +575,7 @@ void init_state_tracer() {
 
     LOG_DEBUG("ASAN DETECTED");
 
-    asan_enabled = 1;
+    addr_san_detected = 1;
   }
 
 }
@@ -765,7 +765,7 @@ void new_heap_alloc_record(void * addr, uint64_t size) {
 
   LOG_DEBUG("NEW HEAP ALLOC: %p (%lu bytes)\n", addr, size);
 
-  if(!asan_enabled) {
+  if(!addr_san_detected) {
 
     // Zero-byte initialization of the area
     memset(addr, 0, size);
@@ -785,7 +785,7 @@ void new_stack_alloc_record(void * addr, uint64_t size) {
 
   LOG_DEBUG("NEW STACK ALLOC: %p (%lu bytes)\n", addr, size);
 
-  if(!asan_enabled) {
+  if(!addr_san_detected) {
 
     // Zero-byte initialization of the area
     memset(addr, 0, size);
@@ -805,7 +805,7 @@ void trace_calloc(void * addr, int size, int nmemb) {
 
   LOG_DEBUG("NEW HEAP CALLOC: %p (%d elems, %lu bytes)\n", addr, nmemb, size*nmemb);
 
-  if(!asan_enabled) {
+  if(!addr_san_detected) {
 
     // Zero-byte initialization of the area
     memset(addr, 0, size*nmemb);
