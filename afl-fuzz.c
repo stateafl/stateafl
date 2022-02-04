@@ -831,7 +831,7 @@ void update_state_aware_variables(struct queue_entry *q, u8 dry_run, char** argv
 
   int is_interesting = is_state_sequence_interesting(state_sequence, state_count);
   int is_repeatable = 0;
-  int repetitions = 3;
+  int repetitions = (dry_run == 0 ? 1 : 3);
 
   if(is_interesting) {
 
@@ -874,9 +874,16 @@ void update_state_aware_variables(struct queue_entry *q, u8 dry_run, char** argv
           break;
         }
       }
+      else if(dry_run) {
+        WARNF("Non-repeatable test case detected (variable state sequence length)!");
+      }
 
 
       ck_free(repeated_state_sequence);
+    }
+
+    if(dry_run && !is_repeatable) {
+        WARNF("Non-repeatable test case detected (no repeated state sequence matching)!");
     }
 
 
