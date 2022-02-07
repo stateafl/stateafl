@@ -828,6 +828,13 @@ void update_state_aware_variables(struct queue_entry *q, u8 dry_run, char** argv
 
   q->unique_state_count = get_unique_state_count(state_sequence, state_count);
 
+#ifdef DEBUG_STATE_SEQUENCE
+  printf("STATE SEQUENCE: ");
+  for(int ii=0; ii<state_count; ii++) {
+    printf("%d ", state_sequence[ii]);
+  }
+  printf("\n");
+#endif
 
   int is_interesting = is_state_sequence_interesting(state_sequence, state_count);
   int is_repeatable = 0;
@@ -856,6 +863,13 @@ void update_state_aware_variables(struct queue_entry *q, u8 dry_run, char** argv
 
       repeated_state_sequence = (*extract_response_codes)(response_buf, response_buf_size, &repeated_state_count);
 
+#ifdef DEBUG_STATE_SEQUENCE
+      printf("REPETITION: ");
+      for(int ii=0; ii<repeated_state_count; ii++) {
+        printf("%d ", repeated_state_sequence[ii]);
+      }
+      printf("\n");
+#endif
 
       if( state_count == repeated_state_count ) {
 
@@ -871,13 +885,13 @@ void update_state_aware_variables(struct queue_entry *q, u8 dry_run, char** argv
 
         if(diff == 0) {
           is_repeatable = 1;
+          ck_free(repeated_state_sequence);
           break;
         }
       }
       else if(dry_run) {
         WARNF("Non-repeatable test case detected (variable state sequence length)!");
       }
-
 
       ck_free(repeated_state_sequence);
     }
@@ -1449,6 +1463,11 @@ int send_over_network()
   // Wait for termination - reset indicator
   state_shared_ptr->iterations = 0;
 
+  // Add more wait time for executions under state analysis
+  u32 poll_wait_msecs_total = poll_wait_msecs;
+  if(current_fsrv == stateafl_fsrv) {
+    poll_wait_msecs_total += 100;
+  }
 
   //Create a TCP/UDP socket
   int sockfd = -1;
@@ -1505,7 +1524,7 @@ int send_over_network()
   }
 
   //retrieve early server response if needed
-  if (net_recv(sockfd, timeout, poll_wait_msecs, &response_buf, &response_buf_size)) goto HANDLE_RESPONSES;
+  if (net_recv(sockfd, timeout, poll_wait_msecs_total, &response_buf, &response_buf_size)) goto HANDLE_RESPONSES;
 
   //write the request messages
   kliter_t(lms) *it;
@@ -1528,7 +1547,7 @@ int send_over_network()
 
     //retrieve server response
     u32 prev_buf_size = response_buf_size;
-    if (net_recv(sockfd, timeout, poll_wait_msecs, &response_buf, &response_buf_size)) {
+    if (net_recv(sockfd, timeout, poll_wait_msecs_total, &response_buf, &response_buf_size)) {
       goto HANDLE_RESPONSES;
     }
 
@@ -1543,7 +1562,7 @@ int send_over_network()
 
 HANDLE_RESPONSES:
 
-  net_recv(sockfd, timeout, poll_wait_msecs, &response_buf, &response_buf_size);
+  net_recv(sockfd, timeout, poll_wait_msecs_total, &response_buf, &response_buf_size);
 
   if (messages_sent > 0 && response_bytes != NULL) {
     response_bytes[messages_sent - 1] = response_buf_size;
