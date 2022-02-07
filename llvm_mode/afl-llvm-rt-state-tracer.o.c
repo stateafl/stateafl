@@ -573,7 +573,7 @@ void init_state_tracer() {
 
   if(getenv("AFL_USE_ASAN") || getenv("ASAN_OPTIONS")) {
 
-    LOG_DEBUG("ASAN DETECTED");
+    LOG_DEBUG("ASAN DETECTED\n");
 
     addr_san_detected = 1;
   }
@@ -1652,7 +1652,7 @@ void end_state_tracer() {
       map_get( &closest_ignore, ignore_map, closest_ignore_addr );
 
       if( closest_ignore != NULL &&
-          *closest_ignore_addr + closest_ignore->size < dump.record->addr + dump.size &&
+          *closest_ignore_addr + closest_ignore->size <= dump.record->addr + dump.size &&
           *closest_ignore_addr >= dump.record->addr + dump_next_start &&
           dump.iter_no_dumped >= closest_ignore->record->iter_no_init &&	  // sanity checks
           (dump.iter_no_dumped <= closest_ignore->record->iter_no_end || closest_ignore->record->iter_no_end == -1)
@@ -1720,6 +1720,8 @@ void end_state_tracer() {
   }
 
 
+#ifndef DISABLE_RATE_LIMITING
+
   // Rate limiting to prevent state explosion
 
   if(calib_shm && calib_shm->enabled == 0) {
@@ -1758,7 +1760,7 @@ void end_state_tracer() {
 
     }
   }
-
+#endif
 
 
   // Store MVP Tree data
