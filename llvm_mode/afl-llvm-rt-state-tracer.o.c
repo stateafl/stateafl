@@ -69,7 +69,7 @@
 #endif
 
 
-#if defined(LOG_FILE_ENABLED) && (defined(TIMING_LOG_LEVEL) || defined(INFO_LOG_LEVEL) || defined(DEBUG_LOG_LEVEL))
+#if defined(LOG_FILE_ENABLED) && (defined(TIMING_LOG_LEVEL) || defined(INFO_LOG_LEVEL) || defined(DEBUG_LOG_LEVEL)) && defined(ENABLE_TIMING)
 
 #define START_TIMING(tracer) struct timeval t1, t2; double elapsedTime; gettimeofday(&t1, NULL);
 
@@ -326,6 +326,8 @@ void init_state_tracer() {
 
     // the var is a valid directory path
     out_dir = strdup(out_dir_str);
+
+    LOG_INFO("OUTDIR: %s\n", out_dir_str);
   }
   else {
 
@@ -1445,8 +1447,8 @@ void end_state_tracer() {
 
   char mvp_file[PATH_MAX];
   char unique_states_file[PATH_MAX];
-  snprintf(mvp_file, PATH_MAX, "%s/tree.mvp", out_dir);
-  snprintf(unique_states_file, PATH_MAX, "%s/tree.count.mvp", out_dir);
+  snprintf(mvp_file, PATH_MAX, "%s/.tree.mvp", out_dir);
+  snprintf(unique_states_file, PATH_MAX, "%s/.tree.count.mvp", out_dir);
 
 
   MVPError err;
@@ -1455,12 +1457,12 @@ void end_state_tracer() {
 
   unsigned int unique_states = 0;
 
-  LOG_DEBUG("Reading MVP Tree from file (%s)...\n", mvp_file);
+  LOG_INFO("Reading MVP Tree from file (%s)...\n", mvp_file);
   tree = mvptree_read(mvp_file, distance_func, MVP_BRANCHFACTOR, MVP_PATHLENGTH, MVP_LEAFCAP, &err);
 
   if(err != MVP_SUCCESS || tree == NULL) {
 
-    LOG_DEBUG("Unable to read MVP Tree from file, initializing new one...\n");
+    LOG_INFO("Unable to read MVP Tree from file, initializing new one...\n");
     tree = mvptree_alloc(NULL, distance_func, MVP_BRANCHFACTOR, MVP_PATHLENGTH, MVP_LEAFCAP);
 
     if(tree == NULL) {
@@ -1768,11 +1770,11 @@ void end_state_tracer() {
 
   if(!(calib_shm && calib_shm->enabled == 1)) {
 
-    LOG_DEBUG("WRITING MVP TREE TO FILE (%s)...\n", mvp_file);
+    LOG_INFO("WRITING MVP TREE TO FILE (%s)...\n", mvp_file);
     err = mvptree_write(tree, mvp_file, 00755);
 
     if(err != MVP_SUCCESS) {
-      LOG_DEBUG("UNABLE TO SAVE MVP TREE (err=%d)\n", err);
+      LOG_INFO("UNABLE TO SAVE MVP TREE (err=%d)\n", err);
     }
 
     FILE * fd_uniq_states = fopen(unique_states_file, "w");
