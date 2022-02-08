@@ -169,6 +169,10 @@ extern char __bss_start, _end;     // uninitialized data area
 #endif
 
 
+extern char __executable_start;
+extern char __etext;
+
+
 //#define __TRACER_USE_PTHREAD_MUTEX
 
 #ifdef __TRACER_USE_PTHREAD_MUTEX
@@ -637,6 +641,46 @@ static void * get_backtrace(void) {
 #endif
 
 
+#ifdef RESTRICT_TEXT_ALLOCS
+
+#define BACKTRACE_DEPTH_FOR_TEXT 6
+
+static int check_text_alloc() {
+
+  void *array[BACKTRACE_DEPTH_FOR_TEXT];
+  int size, i;
+
+  void *alloc_site = NULL;
+
+
+  size = backtrace(array, BACKTRACE_DEPTH_FOR_TEXT);
+
+  if(size > 1) {
+    i = 0;
+    while(i < size) {
+
+      if(array[i] < (void*)init_state_tracer || array[i] > (void*)end_state_tracer) {
+
+        alloc_site = array[i];
+
+        LOG_DEBUG("CHECKING TEXT ALLOC: %p\n", alloc_site);
+
+        if( alloc_site < (void*)&__executable_start || alloc_site > (void*)&__etext ) {
+
+          LOG_DEBUG("ALLOC SITE OUTSIDE TEXT SEGMENT: %p\n", alloc_site);
+          return 1;
+        }
+      }
+
+      i++;
+    }
+  }
+
+  return 0;
+
+}
+#endif
+
 #ifdef BLACKLIST_ALLOC_SITES
 
 static int check_blacklist() {
@@ -700,6 +744,15 @@ void new_alloc_record(void * addr, size_t size) {
 
   if(blacklisted)
     return;   /* Skip if the stack trace contains a blacklisted address */
+
+#endif
+
+#ifdef RESTRICT_TEXT_ALLOCS
+
+  int non_text = check_text_alloc();
+
+  if(non_text)
+    return;   /* Skip if the allocation has not been made from the text segment of the executable (e.g., dynamic libs) */
 
 #endif
 
@@ -861,6 +914,14 @@ void trace_realloc(void * addr, int size, void * oldaddr) {
 
 #endif
 
+#ifdef RESTRICT_TEXT_ALLOCS
+
+  int non_text = check_text_alloc();
+
+  if(non_text)
+    return;   /* Skip if the allocation has not been made from the text segment of the executable (e.g., dynamic libs) */
+
+#endif
 
 
   if((!found && curr_iter_no > 0) || oldalloc_iter_no > 0) {
