@@ -309,7 +309,7 @@ done:
 
 
 
-// Forces call to destructor on SIGTERM/SIGINT
+// Forces call to destructor on signal
 static void tracer_signal_handler(__attribute__((unused)) const int signum) {
     LOG_DEBUG("Got signal (pid=%d)\n", getpid());
     exit(0);
@@ -400,10 +400,10 @@ void init_state_tracer() {
   }
 
   // Set initial state sequence length to 1 (first int)
-  state_shared_ptr->seq_len = 1;
+  //state_shared_ptr->seq_len = 1;
 
   // Set initial state to 0 (dummy value)
-  state_shared_ptr->seq[0] = 0;
+  //state_shared_ptr->seq[0] = 0;
 
 
   signal(SIGTERM, tracer_signal_handler);
@@ -1452,14 +1452,19 @@ void end_state_tracer() {
   snprintf(unique_states_file, PATH_MAX, "%s/.tree.count.mvp", out_dir);
 
 
-  MVPError err;
-  MVPTree* tree;
+  MVPError err = MVP_SUCCESS;
+  MVPTree* tree = NULL;
   CmpFunc distance_func = tlsh_distance;
 
   unsigned int unique_states = 0;
 
-  LOG_INFO("Reading MVP Tree from file (%s)...\n", mvp_file);
-  tree = mvptree_read(mvp_file, distance_func, MVP_BRANCHFACTOR, MVP_PATHLENGTH, MVP_LEAFCAP, &err);
+  struct stat mvp_stat_record;
+  if(stat(mvp_file, &mvp_stat_record) == 0 && mvp_stat_record.st_size > 1) {
+
+    // The file exists and it is non-empty
+    LOG_INFO("Reading MVP Tree from file (%s)...\n", mvp_file);
+    tree = mvptree_read(mvp_file, distance_func, MVP_BRANCHFACTOR, MVP_PATHLENGTH, MVP_LEAFCAP, &err);
+  }
 
   if(err != MVP_SUCCESS || tree == NULL) {
 
@@ -1778,7 +1783,7 @@ void end_state_tracer() {
   if(!(calib_shm && calib_shm->enabled == 1)) {
 
     LOG_INFO("WRITING MVP TREE TO FILE (%s)...\n", mvp_file);
-    err = mvptree_write(tree, mvp_file, 00755);
+    err = mvptree_write(tree, mvp_file, 00777);
 
     if(err != MVP_SUCCESS) {
       LOG_INFO("UNABLE TO SAVE MVP TREE (err=%d)\n", err);

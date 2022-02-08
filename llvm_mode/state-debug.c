@@ -10,21 +10,28 @@
 
 int main(int argc, char** argv) {
 
-    if(argc < 2) {
-
-      fprintf(stderr, "Usage: %s <shm-id>\n", argv[0]);
-      exit(1);
-    }
-
 
     int id;
 
-    errno = 0;
-    id = strtol(argv[1], NULL, 10);
+    if(argc > 1) {
 
-    if(errno != 0) {
-      fprintf(stderr, "Usage: %s <shm-id>\n", argv[0]);
-      exit(1);
+      // Reusing SHM from id
+
+      errno = 0;
+      id = strtol(argv[1], NULL, 10);
+
+      if(errno != 0) {
+        fprintf(stderr, "Usage: %s <shm-id>\n", argv[0]);
+        exit(1);
+      }
+
+    } else {
+
+      // Creating new SHM
+
+      id = shmget(IPC_PRIVATE, sizeof(struct state_shared), IPC_CREAT | 0666);
+
+      printf("New SHM id: %d\n", id);
     }
 
 

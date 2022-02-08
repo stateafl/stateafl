@@ -398,6 +398,7 @@ static inline u8 has_new_bits(u8* virgin_map);
 
 u32 server_wait_usecs = 10000;
 u32 poll_wait_msecs = 1;
+u32 poll_wait_msecs_stateafl = 50;
 u32 socket_timeout_usecs = 1000;
 u32 send_delay_us = 0;
 u8 net_protocol;
@@ -426,6 +427,7 @@ u32 local_port;		/* TCP/UDP port number to use as source */
 /* flags */
 u8 use_net = 0;
 u8 poll_wait = 0;
+u8 poll_wait_stateafl = 0;
 u8 server_wait = 0;
 u8 socket_timeout = 0;
 u8 send_delay = 0;
@@ -1433,6 +1435,23 @@ void update_state_aware_variables(struct queue_entry *q, u8 dry_run, char** argv
   if (state_sequence) ck_free(state_sequence);
 }
 
+
+void wait_for_state_sequence(void) {
+
+    usleep(10000);
+
+    int trials = 1000;
+    while(state_shared_ptr->iterations == 0 && --trials > 0) { usleep(5000); }
+
+    // waiting for state tracer done
+    if(state_shared_ptr->iterations > 0) {
+      trials = 1000;
+      while(state_shared_ptr->seq_len < state_shared_ptr->iterations && --trials > 0) { usleep(1000); }
+    }
+}
+
+
+
 /* Send (mutated) messages in order to the server under test */
 int send_over_network()
 {
@@ -1463,10 +1482,18 @@ int send_over_network()
   // Wait for termination - reset indicator
   state_shared_ptr->iterations = 0;
 
+  // Set initial state sequence length to 1 (first int)
+  state_shared_ptr->seq_len = 1;
+
+  // Set initial state to 0 (dummy value)
+  state_shared_ptr->seq[0] = 0;
+
+
+
   // Add more wait time for executions under state analysis
   u32 poll_wait_msecs_total = poll_wait_msecs;
   if(current_fsrv == stateafl_fsrv) {
-    poll_wait_msecs_total += 100;
+    poll_wait_msecs_total += poll_wait_msecs_stateafl;
   }
 
   //Create a TCP/UDP socket
@@ -1580,24 +1607,6 @@ HANDLE_RESPONSES:
     }
 
   }
-  else {
-
-    /* The server will save the state sequence when exit()ing,
-       AFTER a response message is sent. We wait for a few additional ms,
-       to let the process terminate and save the state sequence. */
-
-    usleep(server_wait_usecs);
-
-    int trials = 1000;
-    while(state_shared_ptr->iterations == 0 && --trials > 0) { usleep(5000); }
-
-    // waiting for state tracer done
-    if(state_shared_ptr->iterations > 0) {
-      trials = 1000;
-      while(state_shared_ptr->seq_len < state_shared_ptr->iterations && --trials > 0) { usleep(1000); }
-    }
-  }
-
 
   close(sockfd);
 
@@ -1606,9 +1615,20 @@ HANDLE_RESPONSES:
   if (terminate_child && (child_pid > 0)) kill(child_pid, SIGTERM);
 
   //give the server a bit more time to gracefully terminate
-  while(1) {
-    int status = kill(child_pid, 0);
-    if ((status != 0) && (errno == ESRCH)) break;
+  if(current_fsrv == afl_fsrv) {
+
+    while(1) {
+      int status = kill(child_pid, 0);
+      if ((status != 0) && (errno == ESRCH)) break;
+    }
+
+  } else {
+
+    /* The server will save the state sequence when exit()ing,
+       AFTER a response message is sent. We wait for a few additional ms,
+       to let the process terminate and save the state sequence. */
+
+    wait_for_state_sequence();
   }
 
   return 0;
@@ -8623,6 +8643,12 @@ static void handle_timeout(int sig) {
   if (child_pid > 0) {
 
     child_timed_out = 1;
+
+    if(stateafl_fsrv != NULL && current_fsrv == stateafl_fsrv) {
+      kill(child_pid, SIGTERM);
+      wait_for_state_sequence();
+    }
+
     kill(child_pid, SIGKILL);
 
   } else if (child_pid == -1 && current_fsrv && current_fsrv->forksrv_pid > 0) {
@@ -9629,7 +9655,7 @@ int main(int argc, char** argv) {
   gettimeofday(&tv, &tz);
   srandom(tv.tv_sec ^ tv.tv_usec ^ getpid());
 
-  while ((opt = getopt(argc, argv, "+i:o:f:m:t:T:dnCB:S:M:x:QN:D:W:w:e:P:KEq:s:RFc:l:u:")) > 0)
+  while ((opt = getopt(argc, argv, "+i:o:f:m:t:T:dnCB:S:M:x:QN:D:W:r:w:e:P:KEq:s:RFc:l:u:")) > 0)
 
     switch (opt) {
 
@@ -9816,6 +9842,13 @@ int main(int argc, char** argv) {
 
         if (sscanf(optarg, "%u", &poll_wait_msecs) < 1 || optarg[0] == '-') FATAL("Bad syntax used for -W");
         poll_wait = 1;
+        break;
+
+      case 'r': /* polling timeout determining maximum amount of time waited before concluding that no responses are forthcoming*/
+        if (poll_wait_stateafl) FATAL("Multiple -r options not supported");
+
+        if (sscanf(optarg, "%u", &poll_wait_msecs_stateafl) < 1 || optarg[0] == '-') FATAL("Bad syntax used for -r");
+        poll_wait_stateafl = 1;
         break;
 
       case 'w': /* receive/send socket timeout determining time waited for each response */
