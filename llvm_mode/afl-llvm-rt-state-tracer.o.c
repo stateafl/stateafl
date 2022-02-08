@@ -436,7 +436,7 @@ void init_state_tracer() {
 
       if(endptr != NULL && *endptr != '\0') {
         LOG_DEBUG("INVALID BLACKLIST_ALLOC_SITES\n");
-        break;
+        goto next_item_alloc;
       }
 
 
@@ -456,6 +456,7 @@ void init_state_tracer() {
 
       map_put( alloc_blacklist_map, &site_addr_start, &site_addr_end );
 
+next_item_alloc:
       site = strtok_r(0, ":", &saveptr_blacklist);
     }
 
@@ -517,7 +518,7 @@ void init_state_tracer() {
 
       if(endptr != NULL && *endptr != '\0') {
         LOG_DEBUG("INVALID GLOBAL ADDR: %s\n", addr_str);
-        break;
+        goto next_item_global;
       }
 
       char* size_str = strtok_r(NULL, "-", &saveptr_item);
@@ -525,7 +526,7 @@ void init_state_tracer() {
 
       if(endptr != NULL && *endptr != '\0') {
         LOG_DEBUG("INVALID GLOBAL SIZE: %s\n", size_str);
-        break;
+        goto next_item_global;
       }
 
 
@@ -547,12 +548,12 @@ void init_state_tracer() {
 
       } else {
         LOG_DEBUG("INVALID ADDRESS, NOT GLOBAL: %p\n", var_addr);
-        break;
+        goto next_item_global;
       }
 
       map_put( ignore_map, &var_addr, &ignore );
 
-
+next_item_global:
       item = strtok_r(NULL, ":", &saveptr_blacklist);
     }
 
@@ -1666,14 +1667,16 @@ void end_state_tracer() {
         dump_size = (*closest_ignore_addr - dump.record->addr) - dump_start;
         dump_next_start = (*closest_ignore_addr - dump.record->addr) + closest_ignore->size;
 
-        LOG_DEBUG("STORING AREA: [start=%p, size=%d]\n", dump.record->addr + dump_start, dump_size);
+        if( dump_size > 0 ) {
+          LOG_DEBUG("STORING AREA: [start=%p, size=%d]\n", dump.record->addr + dump_start, dump_size);
 
-        Tlsh_update(tlsh, dump.contents + dump_start, dump_size);
-        curr_state_buffer_data += dump_size;
+          Tlsh_update(tlsh, dump.contents + dump_start, dump_size);
+          curr_state_buffer_data += dump_size;
 
 #ifdef DEBUG_ALLOC
-        fwrite(dump.contents + dump_start, dump_size, 1, fd_dump);
+          fwrite(dump.contents + dump_start, dump_size, 1, fd_dump);
 #endif
+        }
 
       }
 
@@ -1683,14 +1686,18 @@ void end_state_tracer() {
     dump_start = dump_next_start;
     dump_size = dump.size - dump_next_start;
 
-    LOG_DEBUG("STORING AREA: [start=%p, size=%d]\n", dump.record->addr + dump_start, dump_size);
+    if( dump_size > 0 ) {
+      LOG_DEBUG("STORING AREA: [start=%p, size=%d]\n", dump.record->addr + dump_start, dump_size);
 
-    Tlsh_update(tlsh, dump.contents + dump_start, dump_size);
-    curr_state_buffer_data += dump_size;
+      Tlsh_update(tlsh, dump.contents + dump_start, dump_size);
+      curr_state_buffer_data += dump_size;
 
 #ifdef DEBUG_ALLOC
-    fwrite(dump.contents + dump_start, dump_size, 1, fd_dump);
+      fwrite(dump.contents + dump_start, dump_size, 1, fd_dump);
+#endif
+    }
 
+#ifdef DEBUG_ALLOC
     fclose(fd_dump);
 #endif
 

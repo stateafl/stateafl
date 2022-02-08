@@ -2882,7 +2882,10 @@ void tlsh_set_distance() {
   qsort(calib_shm->dist, calib_shm->dist_len, sizeof(int), compare_tlsh_diff);
 
   // median value
-  tlsh_diff = calib_shm->dist[calib_shm->dist_len/2];
+  //tlsh_diff = calib_shm->dist[calib_shm->dist_len/2];
+
+  // 95%-percentile
+  tlsh_diff = calib_shm->dist[calib_shm->dist_len*90/100];
 
   /*
   // max value
@@ -4338,9 +4341,23 @@ static void perform_dry_run(char** argv) {
     /* Perform additional runs to get data for TLSH calibration */
     if (state_aware_mode) {
 
+#ifdef DEBUG_TLSH
+      int dist_len = calib_shm->dist_len;
+#endif
+
       for(int ii=0; ii<3; ii++) {
 
         run_target(argv, exec_tmout * 2, stateafl_fsrv);
+
+#ifdef DEBUG_TLSH
+        for(int iii=dist_len; iii < calib_shm->dist_len; iii++) {
+          printf("%d ", calib_shm->dist[iii]);
+        }
+
+        printf("\n");
+
+        dist_len = calib_shm->dist_len;
+#endif
       }
 
     }
