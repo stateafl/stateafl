@@ -1615,20 +1615,10 @@ HANDLE_RESPONSES:
   if (terminate_child && (child_pid > 0)) kill(child_pid, SIGTERM);
 
   //give the server a bit more time to gracefully terminate
-  if(current_fsrv == afl_fsrv) {
 
-    while(1) {
-      int status = kill(child_pid, 0);
-      if ((status != 0) && (errno == ESRCH)) break;
-    }
-
-  } else {
-
-    /* The server will save the state sequence when exit()ing,
-       AFTER a response message is sent. We wait for a few additional ms,
-       to let the process terminate and save the state sequence. */
-
-    wait_for_state_sequence();
+  while(1) {
+    int status = kill(child_pid, 0);
+    if ((status != 0) && (errno == ESRCH)) break;
   }
 
   return 0;
