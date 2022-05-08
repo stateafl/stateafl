@@ -47,40 +47,41 @@ try:
 
         for pkt in cap:
 
-            try:
-                if 'TCP' or 'UDP' in pkt:
+            if 'TCP' or 'UDP' in pkt:
 
+                if 'TCP' in pkt:
                     srcport = int.from_bytes(pkt.tcp.srcport.binary_value, "big")
                     dstport = int.from_bytes(pkt.tcp.dstport.binary_value, "big")
+                else:
+                    srcport = int.from_bytes(pkt.udp.srcport.binary_value, "big")
+                    dstport = int.from_bytes(pkt.udp.dstport.binary_value, "big")
 
-                    ports[srcport] = 1
-                    ports[dstport] = 1
+                ports[srcport] = 1
+                ports[dstport] = 1
 
-                    if srcport != SERVER_PORT and dstport != SERVER_PORT:
-                        print("Error: Extraneous TCP/IP flow detected")
-                        print("Please check that the PCAP file only contains traffic from/to SERVER_PORT")
-                        sys.exit(1)
+                if srcport != SERVER_PORT and dstport != SERVER_PORT:
+                    print("Error: Extraneous TCP/IP flow detected")
+                    print("Please check that the PCAP file only contains traffic from/to SERVER_PORT")
+                    sys.exit(1)
 
-                    if len(ports) > 2:
-                        print("Error: Multiple client/server flows detected")
-                        print("Please check that the PCAP file only contains traffic for only one client")
-                        sys.exit(1)
+                if len(ports) > 2:
+                    print("Error: Multiple client/server flows detected")
+                    print("Please check that the PCAP file only contains traffic for only one client")
+                    sys.exit(1)
 
-                    if dstport == SERVER_PORT:
-                        request_msg.extend(pkt.data.data.binary_value)
+                if dstport == SERVER_PORT:
+                    if hasattr(pkt.tcp, 'payload'):
+                        request_msg.extend(pkt.tcp.payload.binary_value)
 
-                    if (('TCP' in pkt and dstport != SERVER_PORT) or
-                       ('UDP' in pkt)) and len(request_msg) > 0:
+                if (('TCP' in pkt and dstport != SERVER_PORT) or
+                   ('UDP' in pkt)) and len(request_msg) > 0:
 
-                        print(f'Writing {len(request_msg)} bytes...')
-                        output.write(int.to_bytes(len(request_msg), 4, "little"))
-                        output.write(request_msg)
+                    print(f'Writing {len(request_msg)} bytes...')
+                    output.write(int.to_bytes(len(request_msg), 4, "little"))
+                    output.write(request_msg)
 
-                        request_msg = bytearray()
-                        total_messages += 1
-
-            except AttributeError:
-                pass
+                    request_msg = bytearray()
+                    total_messages += 1
 
 except IOError as e:
     print("Error: Unable to write output file")
