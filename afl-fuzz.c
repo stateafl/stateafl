@@ -6791,6 +6791,7 @@ void regions_add_bytes(region_t* regions, unsigned int region_count, unsigned in
     while(cur_region < region_count) {
       regions[cur_region].start_byte += added_bytes;
       regions[cur_region].end_byte += added_bytes;
+      cur_region++;
     }
 }
 
@@ -6845,6 +6846,7 @@ int regions_remove_bytes(region_t* regions, unsigned int region_count, unsigned 
     while(cur_region < region_count) {
       regions[cur_region].start_byte -= removed_bytes;
       regions[cur_region].end_byte -= removed_bytes;
+      cur_region++;
     }
 
     if(region_count > 1 && removed_regions > 0) {
