@@ -579,7 +579,7 @@ void update_region_annotations(struct queue_entry* q)
   u32 i = 0;
 
   for (i = 0; i < q->region_count; i++) {
-    if ((response_bytes[i] == 0) || ( i > 0 && (response_bytes[i] - response_bytes[i - 1] == 0)) || i >= messages_sent) {
+    if (i >= messages_sent || (response_bytes[i] == 0) || ( i > 0 && (response_bytes[i] - response_bytes[i - 1] == 0))) {
       q->regions[i].state_sequence = NULL;
       q->regions[i].state_count = 0;
     } else {
@@ -4687,8 +4687,10 @@ static u32 convert_from_replay_to_raw(u8* old_path, u8* new_path) {
 
   FILE * sfd, * dfd;
   char * buf = NULL;
-  unsigned int size, packet_count = 0;
+  unsigned int size;
   u32 len = 0;
+
+  //unsigned int packet_count = 0;
 
   sfd = fopen(old_path, "rb");
   if (sfd == NULL) PFATAL("Unable to open '%s'", old_path);
@@ -4709,12 +4711,12 @@ static u32 convert_from_replay_to_raw(u8* old_path, u8* new_path) {
       buf = (char *)ck_alloc(size);
 
       clearerr(sfd);
-      size_t read_bytes = fread(buf, size, 1, sfd);
+      fread(buf, size, 1, sfd);
 
       if(feof(sfd) || ferror(sfd)) { PFATAL("AFLNet - Unable to read input file"); }
 
       clearerr(dfd);
-      size_t written_bytes = fwrite(buf, size, 1, dfd);
+      fwrite(buf, size, 1, dfd);
 
       len += size;
 
@@ -6765,14 +6767,15 @@ static u8 could_be_interest(u32 old_val, u32 new_val, u8 blen, u8 check_le) {
 void regions_add_bytes(region_t* regions, unsigned int region_count, unsigned int position, int added_bytes) {
 
 #ifdef DEBUG_REGIONS
-   fprintf(stderr, "add position=%d, bytes=%d\n", position, added_bytes);
-   fprintf(stderr, "regions = %p, region_count = %d\n", regions, region_count);
+   FILE * log=fopen("./regions.txt", "a");
+   fprintf(log, "add position=%d, bytes=%d\n", position, added_bytes);
+   fprintf(log, "regions = %p, region_count = %d\n", regions, region_count);
 
    for(int i=0; i<region_count; i++) {
-     fprintf(stderr, "region %d: start=%d, end=%d\n", i, regions[i].start_byte, regions[i].end_byte);
+     fprintf(log, "region %d: start=%d, end=%d\n", i, regions[i].start_byte, regions[i].end_byte);
    }
 
-   fflush(stderr);
+   fclose(log);
 #endif
 
     int cur_region = 0;
@@ -6798,14 +6801,15 @@ void regions_add_bytes(region_t* regions, unsigned int region_count, unsigned in
 int regions_remove_bytes(region_t* regions, unsigned int region_count, unsigned int position, int removed_bytes) {
 
 #ifdef DEBUG_REGIONS
-    fprintf(stderr, "remove position=%d, bytes=%d\n", position, removed_bytes);
-    fprintf(stderr, "regions = %p, region_count = %d\n", regions, region_count);
+   FILE * log=fopen("./regions.txt", "a");
+    fprintf(log, "remove position=%d, bytes=%d\n", position, removed_bytes);
+    fprintf(log, "regions = %p, region_count = %d\n", regions, region_count);
 
     for(int i=0; i<region_count; i++) {
-      fprintf(stderr, "region %d: start=%d, end=%d\n", i, regions[i].start_byte, regions[i].end_byte);
+      fprintf(log, "region %d: start=%d, end=%d\n", i, regions[i].start_byte, regions[i].end_byte);
     }
 
-   fflush(stderr);
+   fclose(log);
 #endif
 
     int cur_region = 0;
@@ -6817,26 +6821,43 @@ int regions_remove_bytes(region_t* regions, unsigned int region_count, unsigned 
     int removed = 0;
     int removed_regions = 0;
     int modified_regions = 0;
+
     while(to_remove > 0) {
 
       regions[cur_region].start_byte -= removed;
       regions[cur_region].end_byte -= removed;
 
-      if(regions[cur_region].end_byte - to_remove + 1 >= position) {
+      if(regions[cur_region].end_byte > position + to_remove - 1) {
 
         regions[cur_region].end_byte -= to_remove;
+
         removed += to_remove;
         to_remove = 0;
 
       } else {
 
-        to_remove -= regions[cur_region].end_byte - position + 1;
-        removed = removed_bytes - to_remove;
-        regions[cur_region].end_byte = position - 1;
-      }
+	if(regions[cur_region].start_byte != position) {
 
-      if(regions[cur_region].start_byte == regions[cur_region].end_byte) {
-        removed_regions++;
+          to_remove -= regions[cur_region].end_byte - position + 1;
+          removed = removed_bytes - to_remove;
+
+	  regions[cur_region].end_byte = position - 1;
+
+	}
+        else {
+
+	  // This region is marked to be removed
+	  // (bytes from "start" to "end" have all been deleted)
+
+          to_remove -= regions[cur_region].end_byte - position + 1;
+          removed = removed_bytes - to_remove;
+
+	  regions[cur_region].start_byte = -1;
+	  regions[cur_region].end_byte = -1;
+
+          removed_regions++;
+
+        }
       }
 
       cur_region++;
@@ -6854,10 +6875,10 @@ int regions_remove_bytes(region_t* regions, unsigned int region_count, unsigned 
       unsigned int new_region_count = region_count - removed_regions;
       region_t* new_regions = ck_alloc(new_region_count * sizeof(region_t));
 
-      int j=0;
-      for(int i=0; i<region_count; i++) {
+      int j=new_region_count-1;
+      for(int i=region_count-1; i>=0; i--) {
 
-        if(regions[i].start_byte == regions[i].end_byte) {
+        if(regions[i].start_byte == -1 && regions[i].end_byte == -1) {
           continue;
         }
 
@@ -6866,7 +6887,7 @@ int regions_remove_bytes(region_t* regions, unsigned int region_count, unsigned 
         new_regions[j].state_sequence = regions[i].state_sequence;
         new_regions[j].state_count = regions[i].state_count;
 
-        j++;
+        j--;
       }
 
       ck_free(mutated_regions);
@@ -8085,6 +8106,11 @@ havoc_stage:
 
   havoc_queued = queued_paths;
 
+  //Update regions to track mutations
+  unsigned int pre_havoc_region_count = mutated_region_count;
+  region_t* pre_havoc_regions = ck_alloc(pre_havoc_region_count * sizeof(region_t));
+  memcpy(pre_havoc_regions, mutated_regions, pre_havoc_region_count * sizeof(region_t));
+
   /* We essentially just do several thousand runs (depending on perf_score)
      where we take the input file and make random stacked tweaks. */
 
@@ -8528,7 +8554,7 @@ havoc_stage:
             new_regions[0].state_sequence = NULL;
             new_regions[0].state_count = 0;
 
-            memcpy(new_regions + sizeof(region_t), mutated_regions, mutated_region_count * sizeof(region_t));
+            memcpy(new_regions + 1, mutated_regions, mutated_region_count * sizeof(region_t));
 
             for(int ii=1; ii<=mutated_region_count; ii++) {
               new_regions[ii].start_byte += src_region_len;
@@ -8600,7 +8626,7 @@ havoc_stage:
             int old_len = temp_len/2;
             region_t* new_regions = ck_alloc(mutated_region_count * 2 * sizeof(region_t));
             memcpy(new_regions, mutated_regions, mutated_region_count * sizeof(region_t));
-            memcpy(new_regions + mutated_region_count*sizeof(region_t), mutated_regions, mutated_region_count * sizeof(region_t));
+            memcpy(new_regions + mutated_region_count, mutated_regions, mutated_region_count * sizeof(region_t));
 
             for(int ii=mutated_region_count; ii<mutated_region_count*2; ii++) {
               new_regions[ii].start_byte += old_len;
@@ -8632,9 +8658,9 @@ havoc_stage:
 
     /* Restore mutated regions */
     ck_free(mutated_regions);
-    mutated_region_count = orig_region_count;
-    mutated_regions = ck_alloc(mutated_region_count * sizeof(region_t));
-    memcpy(mutated_regions, orig_regions, mutated_region_count * sizeof(region_t));
+    mutated_region_count = pre_havoc_region_count;
+    mutated_regions = ck_alloc(pre_havoc_region_count * sizeof(region_t));
+    memcpy(mutated_regions, pre_havoc_regions, pre_havoc_region_count * sizeof(region_t));
 
 
     /* If we're finding new stuff, let's run for a bit longer, limits
@@ -8652,6 +8678,10 @@ havoc_stage:
     }
 
   }
+
+  ck_free(pre_havoc_regions);
+  pre_havoc_regions = NULL;
+  pre_havoc_region_count = 0;
 
   new_hit_cnt = queued_paths + unique_crashes;
 
@@ -8749,24 +8779,74 @@ retry_splicing:
     out_buf = ck_alloc_nozero(len);
     memcpy(out_buf, in_buf, len);
 
+    /* Restore mutated regions,
+     * we are splicing the original input with another one
+     * (note: in_buf has been reset to orig_buf if needed) */
+    ck_free(mutated_regions);
+    mutated_region_count = orig_region_count;
+    mutated_regions = ck_alloc(mutated_region_count * sizeof(region_t));
+    memcpy(mutated_regions, orig_regions, orig_region_count * sizeof(region_t));
+
+
     /* Update mutated regions */
     unsigned int first_region_count = 0;
-    while(orig_regions[first_region_count].end_byte < split_at) {
+    while(mutated_regions[first_region_count].end_byte < split_at) {
         first_region_count++;
     }
 
-    unsigned int second_region_count = 1;
-    while(target->regions[target->region_count - second_region_count].start_byte > split_at) {
+    unsigned int second_region_count = 0;
+    while(target->regions[target->region_count - 1 - second_region_count].start_byte > split_at) {
         second_region_count++;
     }
 
-    region_t* new_regions = ck_alloc((first_region_count + second_region_count) * sizeof(region_t));
-    memcpy(new_regions, mutated_regions, first_region_count * sizeof(region_t));
-    memcpy(new_regions + first_region_count*sizeof(region_t), &target->regions[target->region_count - second_region_count], second_region_count * sizeof(region_t));
+    region_t* new_regions = ck_alloc((first_region_count + second_region_count + 1) * sizeof(region_t));
+
+    if(first_region_count > 0) {
+    	memcpy(new_regions, mutated_regions, first_region_count * sizeof(region_t));
+    }
+
+    if(second_region_count > 0) {
+    	memcpy(new_regions + first_region_count + 1, &target->regions[target->region_count - second_region_count], second_region_count * sizeof(region_t));
+    }
+
+    unsigned int splitted_region = first_region_count;
+
+    new_regions[splitted_region].start_byte = mutated_regions[first_region_count].start_byte;
+    new_regions[splitted_region].end_byte = target->regions[target->region_count - second_region_count - 1].end_byte;
+    new_regions[splitted_region].state_sequence = NULL;
+    new_regions[splitted_region].state_count = 0;
+
+#ifdef DEBUG_REGIONS
+   FILE * log=fopen("./regions.txt", "a");
+   fprintf(log, "splicing at position=%d\n", split_at);
+
+   fprintf(log, "FIRST\n");
+   fprintf(log, "regions = %p, region_count = %d\n", mutated_regions, mutated_region_count);
+
+   for(int i=0; i<mutated_region_count; i++) {
+     fprintf(log, "region %d: start=%d, end=%d\n", i, mutated_regions[i].start_byte, mutated_regions[i].end_byte);
+   }
+
+   fprintf(log, "SECOND\n");
+   fprintf(log, "regions = %p, region_count = %d\n", target->regions, target->region_count);
+
+   for(int i=0; i<target->region_count; i++) {
+     fprintf(log, "region %d: start=%d, end=%d\n", i, target->regions[i].start_byte, target->regions[i].end_byte);
+   }
+
+   fprintf(log, "SPLICED\n");
+   fprintf(log, "regions = %p, region_count = %d\n", new_regions, first_region_count + second_region_count + 1);
+
+   for(int i=0; i<first_region_count + second_region_count + 1; i++) {
+     fprintf(log, "region %d: start=%d, end=%d\n", i, new_regions[i].start_byte, new_regions[i].end_byte);
+   }
+
+   fclose(log);
+#endif
 
     ck_free(mutated_regions);
     mutated_regions = new_regions;
-    mutated_region_count = first_region_count + second_region_count;
+    mutated_region_count = first_region_count + second_region_count + 1;
 
     goto havoc_stage;
 
