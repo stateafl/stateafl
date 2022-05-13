@@ -462,8 +462,8 @@ khash_t(hms) *khms_states;
 kliter_t(lms) *M2_prev, *M2_next;
 
 //Function pointers pointing to Protocol-specific functions
-unsigned int* (*extract_response_codes)(unsigned char* buf, unsigned int buf_size, unsigned int* state_count_ref) = NULL;
-region_t* (*extract_requests)(unsigned char* buf, unsigned int buf_size, unsigned int* region_count_ref) = NULL;
+unsigned int* (*extract_response_codes)(unsigned char* buf, unsigned int buf_size, unsigned int* state_count_ref) = extract_response_state_tracer;
+region_t* (*extract_requests)(unsigned char* buf, unsigned int buf_size, unsigned int* region_count_ref) = extract_requests_generic;
 
 /* Initialize the implemented state machine as a graphviz graph */
 void setup_ipsm()
@@ -2951,9 +2951,6 @@ void tlsh_set_distance() {
 
 unsigned int* extract_response_state_tracer(unsigned char* buf, unsigned int buf_size, unsigned int* state_count_ref) {
 
-  unsigned int orig_state_count = 0;
-  unsigned int* orig_state_sequence = orig_extract_response_codes(buf, buf_size, &orig_state_count);
-
   unsigned int state_tracer_count_all = state_shared_ptr->seq_len;
 
   *state_count_ref = state_tracer_count_all;
@@ -2961,14 +2958,6 @@ unsigned int* extract_response_state_tracer(unsigned char* buf, unsigned int buf
   unsigned int * state_sequence = ck_alloc( (*state_count_ref)*sizeof(int) );
   memcpy(state_sequence, state_shared_ptr->seq, *state_count_ref * sizeof(unsigned int));
 
-
-#ifdef GRAPHVIZ_AFLNET_STATES
-  aflnet_state_count = orig_state_count;
-
-  if(aflnet_state_sequence) ck_free(aflnet_state_sequence);
-  aflnet_state_sequence = ck_alloc( aflnet_state_count*sizeof(int) );
-  memcpy(aflnet_state_sequence, orig_state_sequence, aflnet_state_count*sizeof(int) );
-#endif
 
 #ifdef LOG_STATE_TRACER
 
@@ -2979,8 +2968,23 @@ unsigned int* extract_response_state_tracer(unsigned char* buf, unsigned int buf
     fprintf(log_state_tracer, " 0x%02X", state_sequence[i]);
 
   fprintf(log_state_tracer, "\n");
+#endif
 
 
+#ifdef GRAPHVIZ_AFLNET_STATES
+
+  if (!protocol_selected) FATAL("Please specify the protocol to be tested using the -P option");
+
+  unsigned int orig_state_count = 0;
+  unsigned int* orig_state_sequence = orig_extract_response_codes(buf, buf_size, &orig_state_count);
+
+  aflnet_state_count = orig_state_count;
+
+  if(aflnet_state_sequence) ck_free(aflnet_state_sequence);
+  aflnet_state_sequence = ck_alloc( aflnet_state_count*sizeof(int) );
+  memcpy(aflnet_state_sequence, orig_state_sequence, aflnet_state_count*sizeof(int) );
+
+#ifdef LOG_STATE_TRACER
   fprintf(log_state_tracer, "orig_state_count: %d\n", orig_state_count);
   fprintf(log_state_tracer, "orig_state_sequence: ");
 
@@ -2988,10 +2992,11 @@ unsigned int* extract_response_state_tracer(unsigned char* buf, unsigned int buf
     fprintf(log_state_tracer, " %03d", orig_state_sequence[i]);
 
   fprintf(log_state_tracer, "\n");
-
 #endif
 
   ck_free(orig_state_sequence);
+
+#endif
 
   return state_sequence;
 }
@@ -10399,7 +10404,7 @@ int main(int argc, char** argv) {
   //AFLNet - Check for required arguments
   if (!use_net) FATAL("Please specify network information of the server under test (e.g., tcp://127.0.0.1/8554)");
 
-  if (!protocol_selected) FATAL("Please specify the protocol to be tested using the -P option");
+  //if (!protocol_selected) FATAL("Please specify the protocol to be tested using the -P option");
 
   setup_signal_handlers();
   check_asan_opts();
