@@ -1,6 +1,8 @@
 # StateAFL: A Coverage-Driven (Greybox) Fuzzer for Stateful Network Protocols
 StateAFL is a fuzzer designed for network servers. It extends the original idea of the AFL fuzzer, which automatically evolves fuzz inputs to maximize code coverage. In addition to code coverage, StateAFL seeks to maximize protocol state coverage.
 
+The aim of this tool is to contribute towards a completely-automated solution for stateful protocol fuzzing (similarly to what AFL was able to achieve for stateless programs) and to promote a wider application of fuzzing in real-world systems. The fuzzer does not require developers to implement custom message parsers for the protocol under test.
+
 StateAFL automatically infers the current protocol state of the server. At compile-time, it instruments the target server with probes on memory allocations and network I/O operations. At run-time, it takes snapshots of long-lived data within process memory for each protocol iteration (see figure), and it applies fuzzy hashing to map the in-memory state to a unique protocol state.
 
 ![The fundamental loop of network servers](images/fundamental_loop.png)
@@ -8,7 +10,7 @@ StateAFL automatically infers the current protocol state of the server. At compi
 ![StateAFL blocks](images/stateafl_blocks.png)
 
 
-More information about the internals of StateAFL are available in the following [research paper](https://arxiv.org/pdf/2110.06253.pdf).
+More information about the internals of StateAFL is available in the following [research paper](https://arxiv.org/pdf/2110.06253.pdf).
 
 StateAFL has been implemented on top of the codebase of [AFL](http://lcamtuf.coredump.cx/afl/) and [AFLnet](https://github.com/aflnet/aflnet). To fuzz a server, it should be compiled using the `afl-clang-fast` tool in this project, to perform a compiler pass for instrumenting the target.
 
@@ -76,11 +78,13 @@ export AFL_PATH=$STATEAFL
 
 # Usage
 
-StateAFL can be run using the same command line options of AFLNet and AFL. Run ```afl-fuzz --help``` to see all options. Please also see [README-AFLnet.md](README-AFLnet.md) for more information.
+StateAFL can be run using the same command line options of AFL and AFLNet (except for protocol specification). Run ```afl-fuzz --help``` to see all options. Please also see [README-AFLnet.md](README-AFLnet.md) for more information.
+
+- ***-i folder***: folder with input files, in replayable format (see below)
 
 - ***-N netinfo***: server information (e.g., tcp://127.0.0.1/8554)
 
-- ***-P protocol***: application protocol to be tested (e.g., RTSP, FTP, DTLS12, DNS, DICOM, SMTP, SSH, TLS, DAAP-HTTP, SIP)
+- ***-P protocol***: (optional, for cross-checking protocol state machine against AFLNet) application protocol to be tested (e.g., RTSP, FTP, DTLS12, DNS, DICOM, SMTP, SSH, TLS, DAAP-HTTP, SIP)
 
 - ***-D usec***: (optional) waiting time (in microseconds) for the server to complete its initialization 
 
@@ -98,11 +102,47 @@ StateAFL can be run using the same command line options of AFLNet and AFL. Run `
 
 - ***-s algo***: (optional) seed selection algorithm (e.g., 1. RANDOM_SELECTION, 2. ROUND_ROBIN, 3. FAVOR)
 
+- ***-u path to "vanilla" executable***: (optional) if this is provided, StateAFL uses two forkservers, for better performance: one for profiling the code coverage (by running an input on the target executable indicated in "-u", which can be the same executable that would be used in AFLNet/AFLnwe); and another for profiling the protocol state (by running the executable compiled with StateAFL's afl-clang-fast)
+
 
 Example command: 
 ```bash
-afl-fuzz -d -i in -o out -N <server info> -x <dictionary file> -P <protocol> -D 10000 -q 3 -s 3 -E -K -R <executable binary and its arguments (e.g., port number)>
+afl-fuzz -d -i in -o out -N <server info> -x <dictionary file> -D 10000 -q 3 -s 3 -E -K -R <executable binary and its arguments (e.g., port number)>
 ```
 
+# Preparing the seed inputs
 
+StateAFL takes in input seed files in "replayable" format. It is a simple format also used in AFLNet for replaying inputs (i.e., the ones saves in `replayable-queue` and `replayable-crashes` within the output folder), using the command `aflnet-replay`. The format alternates the size of a message (4 bytes, unsigned int) and the contents of that message.
+
+![Network replay format](images/replay-format.png)
+
+You can automatically generate seed files from PCAP traces, as follows:
+
+```bash
+$ python3 convert-pcap-replay-format.py --input ftp_requests_full_normal.pcap --server-port 2200 --output ftp_requests_full_normal.replay
+
+Writing 13 bytes...
+Writing 13 bytes...
+Writing 6 bytes...
+Writing 5 bytes...
+Writing 24 bytes...
+Writing 6 bytes...
+Writing 10 bytes...
+Writing 6 bytes...
+Converted PCAP saved to ftp_requests_full_normal.replay
+
+$ hexdump -C ftp_requests_full_normal.replay
+
+00000000  0d 00 00 00 55 53 45 52  20 75 62 75 6e 74 75 0d  |....USER ubuntu.|
+00000010  0a 0d 00 00 00 50 41 53  53 20 75 62 75 6e 74 75  |.....PASS ubuntu|
+00000020  0d 0a 06 00 00 00 53 59  53 54 0d 0a 05 00 00 00  |......SYST......|
+00000030  50 57 44 0d 0a 18 00 00  00 50 4f 52 54 20 31 32  |PWD......PORT 12|
+00000040  37 2c 30 2c 30 2c 31 2c  31 33 32 2c 32 30 39 0d  |7,0,0,1,132,209.|
+00000050  0a 06 00 00 00 4c 49 53  54 0d 0a 0a 00 00 00 4d  |.....LIST......M|
+00000060  4b 44 20 74 65 73 74 0d  0a 06 00 00 00 51 55 49  |KD test......QUI|
+00000070  54 0d 0a                                          |T..|
+00000073
+```
+
+The PCAP file should only contain one message flow between the server and a client. Both TCP and UDP are supported. If the PCAP contains multiple message flows, you can use the options `--client-port` and `--ignore-multiple-clients` to pick a specific flow and ignore the others. To run the conversion script, you need to install the [pyshark](https://github.com/KimiNewt/pyshark) Python package, and the [tshark](https://tshark.dev/) tool. It is **not required** that the protocol under test can be parsed by tshark. The script only extracts the raw payload from TCP or UDP traffic.
 
