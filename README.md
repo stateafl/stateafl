@@ -146,3 +146,7 @@ $ hexdump -C ftp_requests_full_normal.replay
 
 The PCAP file should only contain one message flow between the server and a client. Both TCP and UDP are supported. If the PCAP contains multiple message flows, you can use the options `--client-port` and `--ignore-multiple-clients` to pick a specific flow and ignore the others. To run the conversion script, you need to install the [pyshark](https://github.com/KimiNewt/pyshark) Python package, and the [tshark](https://tshark.dev/) tool. It is **not required** that the protocol under test can be parsed by tshark. The script only extracts the raw payload from TCP or UDP traffic.
 
+# Demo
+
+<p align="center"><img src="/images/stateafl-demo.gif?raw=true"/></p>
+
