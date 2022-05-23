@@ -148,5 +148,56 @@ The PCAP file should only contain one message flow between the server and a clie
 
 # Demo
 
+The following demo shows how to use StateAFL on an FTP server. It starts from collecting the PCAP from a simple client-server session. The PCAP is then converted in "replayable" format, and seeded to StateAFL. StateAFL incrementally builds a Finite State Machine of the protocol from the in-memory states of the FTP server.
+
+For more information on automating fuzzing experiments, see the [ProFuzzBench project](https://github.com/profuzzbench/profuzzbench).
+
 <p align="center"><img src="/images/stateafl-demo.gif?raw=true"/></p>
+
+## Demo transcript
+
+Environment variables:
+```
+WORKDIR=/home/ubuntu/experiments
+STATEAFL=/home/ubuntu/stateafl
+```
+
+To collect a PCAP with tcpdump:
+```
+$ sudo tcpdump -i lo -w pcaps/ftp.pcap port 2200
+```
+
+To run the LightFTP server:
+```
+$ ./fftp fftp.conf 2200
+```
+
+To run the FTP client:
+```
+$ ftp localhost 2200
+Logged-in as "ubuntu", pass "ubuntu"
+pwd
+mkdir TEST
+cd TEST
+pwd
+quit
+```
+
+To convert the PCAP trace:
+```
+$ python3 $STATEAFL/convert-pcap-replay-format.py --input $WORKDIR/pcaps/ftp.pcap --server-port 2200 --output $WORKDIR/in-ftp-replay/ftp.replay
+```
+
+To fuzz the FTP server:
+```
+$ make clean
+$ CC=${STATEAFL}/afl-clang-fast make clean all -j3
+
+$ ${STATEAFL}/afl-fuzz -d -i ${WORKDIR}/in-ftp-replay -x ${WORKDIR}/ftp.dict -o ${WORKDIR}/output -N tcp://127.0.0.1/2200 -D 10000 -q 3 -s 3 -E -K -m none -t 5000 -c ${WORKDIR}/ftpclean -u ${WORKDIR}/LightFTP/Source/Release/fftp -- ./fftp fftp.conf 2200
+```
+
+To plot (on the terminal) the protocol state machine:
+```
+$ watch -n 1 'cat $WORKDIR/output/ipsm.dot | graph-easy --from=dot --as_ascii 2>/dev/null'
+```
 
