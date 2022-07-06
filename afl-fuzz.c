@@ -106,6 +106,8 @@ EXP_ST u8 *in_dir,                    /* Input directory with test cases  */
           *target_path,               /* Path to target binary            */
           *target_path_afl,           /* Path to "vanilla" version of
                                          binary (without StateAFL probes) */
+	  *wd_vanilla,                /* Path to working directory for
+					 "vanilla" binary                 */
           *orig_cmdline;              /* Original command line            */
 
 EXP_ST u32 exec_tmout = EXEC_TIMEOUT; /* Configurable exec timeout (ms)   */
@@ -3666,7 +3668,7 @@ static void destroy_extras(void) {
    cloning a stopped child. So, we just execute once, and then send commands
    through a pipe. The other part of this logic is in afl-as.h. */
 
-EXP_ST void init_forkserver(char** argv, struct forkserver *fsrv, u8* exe_path, u8 disable_tracing) {
+EXP_ST void init_forkserver(char** argv, struct forkserver *fsrv, u8* exe_path, u8* working_dir, u8 disable_tracing) {
 
   static struct itimerval it;
   int st_pipe[2], ctl_pipe[2];
@@ -3684,6 +3686,8 @@ EXP_ST void init_forkserver(char** argv, struct forkserver *fsrv, u8* exe_path, 
   if (fsrv->forksrv_pid < 0) PFATAL("fork() failed");
 
   if (!fsrv->forksrv_pid) {
+
+    if(working_dir) chdir(working_dir);
 
     struct rlimit r;
 
@@ -10079,7 +10083,7 @@ int main(int argc, char** argv) {
   gettimeofday(&tv, &tz);
   srandom(tv.tv_sec ^ tv.tv_usec ^ getpid());
 
-  while ((opt = getopt(argc, argv, "+i:o:f:m:t:T:dnCB:S:M:x:QN:D:W:r:w:e:P:KEq:s:RFc:l:u:")) > 0)
+  while ((opt = getopt(argc, argv, "+i:o:f:m:t:T:dnCB:S:M:x:QN:D:W:r:w:e:P:KEq:s:RFc:l:u:U:")) > 0)
 
     switch (opt) {
 
@@ -10382,7 +10386,7 @@ int main(int argc, char** argv) {
         if (local_port < 1024 || local_port > 65535) FATAL("Invalid source port number");
         break;
 
-      case 'u': { /* "vanilla" executable (without StateAFL probes) */
+      case 'u': /* "vanilla" executable (without StateAFL probes) */
 
           if (target_path_afl) FATAL("Multiple -u options not supported");
 
@@ -10391,7 +10395,17 @@ int main(int argc, char** argv) {
 
           break;
 
-      }
+      case 'U': /* working directory to run the "vanilla" executable (without StateAFL probes) */
+
+          if (wd_vanilla) FATAL("Multiple -U options not supported");
+
+	  wd_vanilla = ck_strdup(optarg);
+
+	  DIR* dir = opendir(wd_vanilla);
+	  if(!dir) FATAL("-U should provide a valid and accessible path to directory");
+	  closedir(dir);
+
+          break;
 
       default:
 
@@ -10496,12 +10510,12 @@ int main(int argc, char** argv) {
     afl_fsrv = ck_alloc(sizeof(struct forkserver));
 
     if(target_path_afl)
-      init_forkserver(use_argv, afl_fsrv, target_path_afl, 0);
+      init_forkserver(use_argv, afl_fsrv, target_path_afl, wd_vanilla, 0);
     else
-      init_forkserver(use_argv, afl_fsrv, target_path, 0);
+      init_forkserver(use_argv, afl_fsrv, target_path, NULL, 0);
 
     stateafl_fsrv = ck_alloc(sizeof(struct forkserver));
-    init_forkserver(use_argv, stateafl_fsrv, target_path, 1);
+    init_forkserver(use_argv, stateafl_fsrv, target_path, NULL, 1);
 
     current_fsrv = afl_fsrv;
   }
@@ -10694,6 +10708,7 @@ stop_fuzzing:
 
   ck_free(afl_fsrv);
   ck_free(stateafl_fsrv);
+  ck_free(wd_vanilla);
 
   destroy_ipsm();
 
