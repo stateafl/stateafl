@@ -104,6 +104,8 @@ StateAFL can be run using the same command line options of AFL and AFLNet (excep
 
 - ***-u path to "vanilla" executable***: (optional) if this is provided, StateAFL uses two forkservers, for better performance: one for profiling the code coverage (by running an input on the target executable indicated in "-u", which can be the same executable that would be used in AFLNet/AFLnwe); and another for profiling the protocol state (by running the executable compiled with StateAFL's afl-clang-fast)
 
+- ***-U path to folder***: (optional) working directory where to run the "vanilla" executable (see option -u)
+
 
 Example command: 
 ```bash
