@@ -14,7 +14,7 @@ StateAFL has been implemented on top of the codebase of [AFL](http://lcamtuf.cor
 
 # Reference
 
-More information about StateAFL is available in the following [research paper](https://link.springer.com/article/10.1007/s10664-022-10233-3) with open access. The paper is also available on [arXiv](https://arxiv.org/pdf/2110.06253.pdf). If you use this code in your scientific work, please cite the paper as follows:
+More information about StateAFL is available in the following [research paper](https://link.springer.com/article/10.1007/s10664-022-10233-3) with open access. The paper is also available on [arXiv](https://arxiv.org/pdf/2110.06253v2.pdf). If you use this code in your scientific work, please cite the paper as follows:
 
 ```
 @article{StateAFL,
