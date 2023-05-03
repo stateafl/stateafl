@@ -88,8 +88,8 @@ try:
 
                 if (dstport == SERVER_PORT and
                    (CLIENT_PORT is None or srcport == CLIENT_PORT)):
-                    if hasattr(pkt, 'data'):
-                        request_msg.extend(pkt.data.data.binary_value)
+                    if hasattr(pkt.tcp, 'payload'):
+                        request_msg.extend(pkt.tcp.payload.binary_value)
 
                 if (('TCP' in pkt and dstport != SERVER_PORT) or
                    ('UDP' in pkt)) and len(request_msg) > 0:
